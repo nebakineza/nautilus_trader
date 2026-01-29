@@ -11,7 +11,7 @@ from nautilus_trader.common.enums import LogColor
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.book import OrderBook
 from nautilus_trader.model.data import OrderBookDeltas
-from nautilus_trader.model.enums import BookType, OrderSide, TimeInForce
+from nautilus_trader.model.enums import BookType, OrderSide, OrderStatus, TimeInForce
 from nautilus_trader.model.identifiers import ClientId, InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.model.objects import Currency, Quantity
@@ -34,6 +34,7 @@ class LeadLagMMv3Config(StrategyConfig, frozen=True, kw_only=True):
     spread_bps: Decimal = Decimal("16.0")
     quote_refresh_interval_ms: int = 30
     quote_refresh_jitter_ms: int = 30
+    quote_refresh_offset_ms: int = 0
     min_quote_lifetime_ms: int = 20
     min_requote_ticks: int = 1
 
@@ -73,6 +74,22 @@ class LeadLagMMv3Config(StrategyConfig, frozen=True, kw_only=True):
     liquidity_high_scalar: Decimal = Decimal("1.5")
     liquidity_low_scalar: Decimal = Decimal("0.5")
 
+    # Edge-based requote
+    edge_min_ratio: Decimal = Decimal("0.3")
+    edge_max_ratio: Decimal = Decimal("0.8")
+
+    # Local OFI (order flow imbalance)
+    ofi_enabled: bool = False
+    ofi_max_bps: Decimal = Decimal("3.0")
+    ofi_depth: int | None = 10
+
+    # Dynamic markout-based risk
+    markout_window_ms: int = 1000
+    markout_ema_alpha: Decimal = Decimal("0.2")
+    markout_widen_bps: Decimal = Decimal("5.0")
+    markout_max_spread_multiplier: Decimal = Decimal("2.0")
+    log_markout_events: bool = False
+
     # Balance protection
     min_balance_ratio: Decimal = Decimal("0.95")
 
@@ -107,6 +124,7 @@ class LeadLagMMv3(Strategy):
         self._tick_size: Decimal = Decimal("0")
         self._order_qty: Quantity | None = None
         self._last_quote_ts_ns: int = 0
+        self._next_refresh_ts_ns: int = 0
         self._last_leader_ts_ns: int = 0
         self._last_guard_ts_ns: int = 0
         self._last_follower_ts_ns: int = 0
@@ -119,6 +137,8 @@ class LeadLagMMv3(Strategy):
         self._global_guard_active: bool = False
 
         self._net_position: Decimal = Decimal("0")
+        self._markout_pending: list[tuple[int, OrderSide, Decimal]] = []
+        self._markout_ema_bps: Decimal = Decimal("0")
         self._inventory_manager = InventoryRiskManager(
             max_position=self.config.max_position_qty,
             risk_aversion=self.config.risk_aversion,
@@ -130,6 +150,7 @@ class LeadLagMMv3(Strategy):
 
     def on_start(self) -> None:
         gc.disable()
+        self._next_refresh_ts_ns = self._now_ns() + (self.config.quote_refresh_offset_ms * 1_000_000)
         self.follower_instrument = self.cache.instrument(self.config.follower_instrument_id)
         if self.follower_instrument is None:
             self.log.error(f"Could not find follower instrument {self.config.follower_instrument_id}")
@@ -214,6 +235,13 @@ class LeadLagMMv3(Strategy):
         self.leader_mid = mid
         self._update_guard()
 
+        # Follow the leader immediately (rate-limited)
+        now_ns = self._now_ns()
+        if now_ns >= self._next_refresh_ts_ns:
+            next_refresh = self._refresh_quotes(now_ns)
+            if next_refresh:
+                self._next_refresh_ts_ns = next_refresh
+
     def _handle_guard_deltas(self, deltas: OrderBookDeltas) -> None:
         if self.guard_book is None:
             return
@@ -239,7 +267,15 @@ class LeadLagMMv3(Strategy):
 
         self.follower_mid = mid
         self._update_guard()
-        self._refresh_quotes()
+        now_ns = self._now_ns()
+        self._update_markout(now_ns)
+
+        if now_ns < self._next_refresh_ts_ns:
+            return
+
+        next_refresh_ts_ns = self._refresh_quotes(now_ns)
+        if next_refresh_ts_ns:
+            self._next_refresh_ts_ns = next_refresh_ts_ns
 
     def _book_mid(self, book: OrderBook) -> Decimal | None:
         bid = book.best_bid_price()
@@ -336,23 +372,30 @@ class LeadLagMMv3(Strategy):
             if order.side == side:
                 self.cancel_order(order, client_id=self.client_id)
 
-    def _refresh_quotes(self) -> None:
+    def _refresh_quotes(self, now_ns: int) -> int:
         if self.follower_instrument is None or self.follower_mid is None:
-            return
+            return 0
+
+        pending_statuses = (OrderStatus.PENDING_CANCEL, OrderStatus.PENDING_UPDATE)
+        if self._bid_order is not None and getattr(self._bid_order, "status", None) in pending_statuses:
+            return 0
+        if self._ask_order is not None and getattr(self._ask_order, "status", None) in pending_statuses:
+            return 0
 
         if self._guard_block_buy or self._guard_block_sell or self._global_guard_active:
-            return
+            return 0
 
         if self._is_data_stale():
-            return
+            return 0
 
-        now_ns = self._now_ns()
         jitter = random.randint(0, max(0, self.config.quote_refresh_jitter_ms)) * 1_000_000
         min_interval = (self.config.quote_refresh_interval_ms * 1_000_000) + jitter
         if now_ns - self._last_quote_ts_ns < min_interval:
-            return
+            return 0
 
         self._last_quote_ts_ns = now_ns
+
+        self._update_markout(now_ns)
 
         if self._bid_order and getattr(self._bid_order, "is_closed", False):
             self._bid_order = None
@@ -361,18 +404,24 @@ class LeadLagMMv3(Strategy):
 
         inventory_skew, bid_qty, ask_qty = self._inventory_adjustments()
 
-        spread_half = self.follower_mid * (self.config.spread_bps / Decimal("20000"))
+        spread_bps = self._current_spread_bps()
+        spread_half = self.follower_mid * (spread_bps / Decimal("20000"))
         if self.leader_mid is None:
             fair_price = self.follower_mid
         else:
             fair_price = (self.follower_mid * Decimal("0.1")) + (self.leader_mid * Decimal("0.9"))
+
+        if self.config.ofi_enabled and self.follower_book is not None:
+            ofi = self._calculate_ofi(self.follower_book)
+            if ofi is not None:
+                fair_price += self.follower_mid * (self.config.ofi_max_bps * ofi / Decimal("10000"))
         raw_bid = (fair_price - spread_half) + inventory_skew
         raw_ask = (fair_price + spread_half) + inventory_skew
 
         best_bid = self.follower_book.best_bid_price() if self.follower_book else None
         best_ask = self.follower_book.best_ask_price() if self.follower_book else None
         if best_bid is None or best_ask is None:
-            return
+            return 0
 
         tick = self._tick_size if self._tick_size else Decimal("0")
         best_bid_dec = best_bid.as_decimal()
@@ -389,21 +438,40 @@ class LeadLagMMv3(Strategy):
             desired_ask = mid + (tick * 2 if tick else Decimal("0.01"))
 
         if bid_qty is not None:
-            self._place_or_replace(OrderSide.BUY, desired_bid, now_ns, bid_qty)
+            self._place_or_replace(OrderSide.BUY, desired_bid, fair_price, spread_bps, now_ns, bid_qty)
         if ask_qty is not None:
-            self._place_or_replace(OrderSide.SELL, desired_ask, now_ns, ask_qty)
+            self._place_or_replace(OrderSide.SELL, desired_ask, fair_price, spread_bps, now_ns, ask_qty)
+
+        return now_ns + min_interval
 
     def _place_or_replace(
         self,
         side: OrderSide,
         desired_price: Decimal,
+        fair_price: Decimal,
+        spread_bps: Decimal,
         now_ns: int,
         desired_qty: Quantity,
     ) -> None:
         order = self._bid_order if side == OrderSide.BUY else self._ask_order
         order_ts_ns = self._bid_order_ts_ns if side == OrderSide.BUY else self._ask_order_ts_ns
 
-        if self._should_replace(order, order_ts_ns, desired_price, desired_qty, now_ns):
+        if order is not None and not getattr(order, "is_closed", False):
+            current_price = order.price.as_decimal()
+            current_qty = order.quantity.as_decimal() if getattr(order, "quantity", None) else None
+            if current_qty is not None:
+                if desired_price == current_price and desired_qty.as_decimal() == current_qty:
+                    return
+
+        if self._should_replace(
+            order,
+            order_ts_ns,
+            desired_price,
+            fair_price,
+            spread_bps,
+            desired_qty,
+            now_ns,
+        ):
             if order is not None and not getattr(order, "is_closed", False):
                 if self.config.use_modify_orders:
                     price = self.follower_instrument.make_price(desired_price)
@@ -444,6 +512,8 @@ class LeadLagMMv3(Strategy):
         order: object | None,
         order_ts_ns: int,
         desired_price: Decimal,
+        fair_price: Decimal,
+        spread_bps: Decimal,
         desired_qty: Quantity,
         now_ns: int,
     ) -> bool:
@@ -455,6 +525,20 @@ class LeadLagMMv3(Strategy):
             return False
 
         current_price = order.price.as_decimal()
+
+        if fair_price > Decimal("0"):
+            if order.side == OrderSide.BUY:
+                current_edge_bps = (fair_price - current_price) / fair_price * Decimal("10000")
+            else:
+                current_edge_bps = (current_price - fair_price) / fair_price * Decimal("10000")
+
+            min_edge = spread_bps * self.config.edge_min_ratio
+            max_edge = spread_bps * self.config.edge_max_ratio
+            if current_edge_bps < min_edge:
+                return True
+            if current_edge_bps > max_edge:
+                return True
+
         ticks_delta = (abs(desired_price - current_price) / self._tick_size) if self._tick_size else Decimal("0")
 
         quantity_delta = Decimal("0")
@@ -462,6 +546,68 @@ class LeadLagMMv3(Strategy):
             quantity_delta = abs(order.quantity.as_decimal() - desired_qty.as_decimal())
 
         return ticks_delta >= self.config.min_requote_ticks or quantity_delta > Decimal("0")
+
+    def _calculate_ofi(self, book: OrderBook) -> Decimal | None:
+        bid_levels = book.bids()
+        ask_levels = book.asks()
+        if self.config.ofi_depth:
+            bid_levels = bid_levels[: self.config.ofi_depth]
+            ask_levels = ask_levels[: self.config.ofi_depth]
+
+        bid_qty = Decimal("0")
+        ask_qty = Decimal("0")
+        for level in bid_levels:
+            bid_qty += Decimal(str(level.size()))
+        for level in ask_levels:
+            ask_qty += Decimal(str(level.size()))
+
+        total = bid_qty + ask_qty
+        if total <= Decimal("0"):
+            return None
+        return (bid_qty - ask_qty) / total
+
+    def _current_spread_bps(self) -> Decimal:
+        multiplier = Decimal("1")
+        if self.config.markout_widen_bps > Decimal("0"):
+            widen = self._markout_ema_bps / self.config.markout_widen_bps
+            widen = min(widen, self.config.markout_max_spread_multiplier - Decimal("1"))
+            if widen > Decimal("0"):
+                multiplier += widen
+        return self.config.spread_bps * multiplier
+
+    def _update_markout(self, now_ns: int) -> None:
+        if self.follower_mid is None or not self._markout_pending:
+            return
+
+        window_ns = self.config.markout_window_ms * 1_000_000
+        remaining: list[tuple[int, OrderSide, Decimal]] = []
+        for ts_ns, side, price in self._markout_pending:
+            if now_ns - ts_ns < window_ns:
+                remaining.append((ts_ns, side, price))
+                continue
+
+            if price <= Decimal("0"):
+                continue
+
+            if side == OrderSide.BUY:
+                markout_bps = (self.follower_mid - price) / price * Decimal("10000")
+            else:
+                markout_bps = (price - self.follower_mid) / price * Decimal("10000")
+
+            penalty = Decimal("0")
+            if markout_bps < Decimal("0"):
+                penalty = -markout_bps
+
+            alpha = self.config.markout_ema_alpha
+            self._markout_ema_bps = (alpha * penalty) + ((Decimal("1") - alpha) * self._markout_ema_bps)
+
+            if self.config.log_markout_events:
+                self.log.info(
+                    f"Markout bps={markout_bps:.2f}, ema={self._markout_ema_bps:.2f}",
+                    LogColor.MAGENTA,
+                )
+
+        self._markout_pending = remaining
 
     def _inventory_adjustments(self) -> tuple[Decimal, Quantity | None, Quantity | None]:
         if self.follower_mid is None or self._order_qty is None:
@@ -499,18 +645,28 @@ class LeadLagMMv3(Strategy):
             vol_scalar = self.config.vol_scalar_reduction
 
         depth_scalar = Decimal("1.0")
-        if side == OrderSide.BUY and self.leader_book is not None:
-            best_bid_size = self.leader_book.best_bid_size()
-            if best_bid_size is not None:
-                best_bid_qty = best_bid_size.as_decimal()
-                if best_bid_qty > self.config.liquidity_high_qty:
-                    depth_scalar = self.config.liquidity_high_scalar
-                elif best_bid_qty < self.config.liquidity_low_qty:
-                    depth_scalar = self.config.liquidity_low_scalar
+        if self.leader_book is not None:
+            if side == OrderSide.BUY:
+                best_bid_size = self.leader_book.best_bid_size()
+                if best_bid_size is not None:
+                    best_bid_qty = best_bid_size.as_decimal()
+                    if best_bid_qty > self.config.liquidity_high_qty:
+                        depth_scalar = self.config.liquidity_high_scalar
+                    elif best_bid_qty < self.config.liquidity_low_qty:
+                        depth_scalar = self.config.liquidity_low_scalar
+            elif side == OrderSide.SELL:
+                best_ask_size = self.leader_book.best_ask_size()
+                if best_ask_size is not None:
+                    best_ask_qty = best_ask_size.as_decimal()
+                    if best_ask_qty > self.config.liquidity_high_qty:
+                        depth_scalar = self.config.liquidity_high_scalar
+                    elif best_ask_qty < self.config.liquidity_low_qty:
+                        depth_scalar = self.config.liquidity_low_scalar
 
         final_size = base_qty * vol_scalar * depth_scalar
         final_size = min(final_size, self.config.max_order_qty)
-        final_size = max(final_size, self.config.min_order_qty)
+        min_floor = self.config.order_qty * Decimal("0.5")
+        final_size = max(final_size, min_floor, self.config.min_order_qty)
         return final_size
 
     def _apply_balance_limits(self, base_qty: Decimal, side: OrderSide) -> Quantity | None:
@@ -558,6 +714,27 @@ class LeadLagMMv3(Strategy):
                 self._net_position += event.last_qty.as_decimal()
             elif event.order_side == OrderSide.SELL:
                 self._net_position -= event.last_qty.as_decimal()
+
+            price = None
+            if hasattr(event, "last_px") and event.last_px is not None:
+                price = event.last_px.as_decimal()
+            elif hasattr(event, "price") and event.price is not None:
+                price = event.price.as_decimal()
+
+            if price is not None:
+                ts_event = getattr(event, "ts_event", None)
+                ts_ns = self._event_ts_ns_from_event(ts_event)
+                self._markout_pending.append((ts_ns, event.order_side, price))
+
+    def _event_ts_ns_from_event(self, ts_event) -> int:
+        if ts_event is None:
+            return self._now_ns()
+        ts_value = int(ts_event)
+        if ts_value < 1_000_000_000_000:  # seconds
+            return ts_value * 1_000_000_000
+        if ts_value < 1_000_000_000_000_000:  # milliseconds
+            return ts_value * 1_000_000
+        return ts_value
 
     def _now_ns(self) -> int:
         try:
