@@ -82,9 +82,9 @@ docker = ["docker>=7.1.0,<8.0.0"]
 dydx = [
   "v4-proto==7.0.5; python_version < '3.14'",
   "grpcio==1.68.1; python_version < '3.14'",
-  "protobuf==5.29.5; python_version < '3.14'", # Pinned to 5.29.5 (fixes GHSA-8qvm-5x2c-j2w7)
+  "protobuf>=5.29.6,<6.0.0; python_version < '3.14'", # Pinned to >=5.29.6 for CVE-2026-0994
   "bech32>=1.2.0,<2.0.0; python_version < '3.14'",
-  "ecdsa>=0.19.1,<1.0.0; python_version < '3.14'",
+  "ecdsa>=0.19.2,<1.0.0; python_version < '3.14'",
   "bip-utils>=2.10.0,<3.0.0; python_version < '3.14'",
   "pycryptodome>=3.20.0,<4.0.0; python_version < '3.14'",
 ]
