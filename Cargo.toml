@@ -304,8 +304,6 @@ databento = { version = "0.39.0", default-features = false, features = [
 dydx-proto = "0.4.0"
 fallible-streaming-iterator = "0.1.9"
 flate2 = "1.1.8"
-hypersync-client = { version = "0.23.0" }
-hypersync-schema = { version = "0.4.0" }
 itoa = "1.0.17"
 prost = { version = "0.13.5", default-features = false, features = ["std"] }
 ryu = "1.0.22"

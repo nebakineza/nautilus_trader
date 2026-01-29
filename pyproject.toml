@@ -79,15 +79,6 @@ ib = [
   "nautilus-ibapi==10.37.2; python_version < '3.14'",
 ]
 docker = ["docker>=7.1.0,<8.0.0"]
-dydx = [
-  "v4-proto==7.0.5; python_version < '3.14'",
-  "grpcio==1.68.1; python_version < '3.14'",
-  "protobuf>=5.29.6,<6.0.0; python_version < '3.14'", # Pinned to >=5.29.6 for CVE-2026-0994
-  "bech32>=1.2.0,<2.0.0; python_version < '3.14'",
-  "ecdsa>=0.19.2,<1.0.0; python_version < '3.14'",
-  "bip-utils>=2.10.0,<3.0.0; python_version < '3.14'",
-  "pycryptodome>=3.20.0,<4.0.0; python_version < '3.14'",
-]
 polymarket = ["py-clob-client>=0.34.5,<1.0.0"]
 visualization = ["plotly>=6.3.1,<7.0.0"]
 

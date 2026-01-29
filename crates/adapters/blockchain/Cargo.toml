@@ -30,7 +30,6 @@ extension-module = [
   "python",
   "pyo3/extension-module",
 ]
-hypersync = ["hypersync-client", "hypersync-schema"]
 python = [
   "nautilus-infrastructure/python",
   "nautilus-live/streaming",
@@ -76,8 +75,6 @@ tokio-tungstenite = { workspace = true }
 tokio-util = { workspace = true }
 ustr = { workspace = true }
 
-hypersync-client = { workspace = true, optional = true }
-hypersync-schema = { workspace = true, optional = true }
 pyo3 = { workspace = true, optional = true }
 pyo3-stub-gen = { workspace = true, optional = true }
 turmoil = { workspace = true, optional = true }
@@ -86,14 +83,3 @@ turmoil = { workspace = true, optional = true }
 rstest = { workspace = true }
 turmoil = { workspace = true }
 
-[[bin]]
-name = "node_wallet"
-path = "bin/node_wallet.rs"
-required-features = ["hypersync"]
-doc = false
-
-[[example]]
-name = "blockchain-data-tester"
-path = "examples/node_data_tester.rs"
-required-features = ["hypersync"]
-doc = false
