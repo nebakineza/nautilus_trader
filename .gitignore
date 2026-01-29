@@ -59,6 +59,19 @@ htmlcov/
 .ruff_cache/
 *dask-worker-space*
 __pycache__/
+.venv/
+.pytest_cache/
+
+# Local data outputs
+backtest_results*/
+ob_data/
+ob_data_live/
+tick_data/
+sweep_results/
+logs/
+
+# Large data files
+*.data
 cython_debug/
 requirements*
 venv*/

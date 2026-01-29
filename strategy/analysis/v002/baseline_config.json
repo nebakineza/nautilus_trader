@@ -1,0 +1,24 @@
+{
+  "name": "baseline_micro_markout_tuned4_2h",
+  "description": "Baseline config from tuned4 run (positive 2h/36k).",
+  "instruments": [
+    {
+      "instrument_id": "BTCUSDT-SPOT.BYBIT",
+      "base_qty": "0.0001",
+      "max_position_qty": "0.0005",
+      "weight": 1.0,
+      "obi_sensitivity": 1.2,
+      "min_spread_bps": 0,
+      "max_spread_bps": 10
+    }
+  ],
+  "min_edge_bps": 0.0,
+  "edge_bps_multiplier": 180.0,
+  "maker_fee_bps": 0.1,
+  "risk_aversion": 1.0,
+  "momentum_threshold": 0.002,
+  "min_fill_prob": 0.0,
+  "use_micro_price": true,
+  "adverse_selection_cooldown_ms": 800,
+  "adverse_selection_spread_multiplier": 1.05
+}
