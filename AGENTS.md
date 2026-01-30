@@ -16,6 +16,7 @@ This document orients automated agents to the project structure, data pipeline, 
 Behavior summary:
 - Lead (Binance) book feeds signal, follower (Bybit) executes.
 - **Event-Driven:** Refreshes quotes on both Leader and Follower updates.
+- **Batching:** Uses `SubmitOrderList` for atomic placement of new Bid/Ask pairs (halves API calls on reset).
 - Dynamic order sizing:
   - Volatility scalar based on diff bps.
   - Liquidity scalar based on leader book **bid (BUY)** and **ask (SELL)** walls.

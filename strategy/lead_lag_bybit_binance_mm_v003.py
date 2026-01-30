@@ -15,6 +15,7 @@ from nautilus_trader.model.enums import BookType, OrderSide, OrderStatus, TimeIn
 from nautilus_trader.model.identifiers import ClientId, InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.model.objects import Currency, Quantity
+from nautilus_trader.model.orders import Order, OrderList
 from nautilus_trader.trading.strategy import Strategy
 
 from strategy.inventory.risk_manager import InventoryRiskManager
@@ -437,10 +438,25 @@ class LeadLagMMv3(Strategy):
             desired_bid = mid - (tick * 2 if tick else Decimal("0.01"))
             desired_ask = mid + (tick * 2 if tick else Decimal("0.01"))
 
+        new_orders = []
+
         if bid_qty is not None:
-            self._place_or_replace(OrderSide.BUY, desired_bid, fair_price, spread_bps, now_ns, bid_qty)
+             order = self._place_or_replace(OrderSide.BUY, desired_bid, fair_price, spread_bps, now_ns, bid_qty, defer_submit=True)
+             if order:
+                 new_orders.append(order)
+
         if ask_qty is not None:
-            self._place_or_replace(OrderSide.SELL, desired_ask, fair_price, spread_bps, now_ns, ask_qty)
+             order = self._place_or_replace(OrderSide.SELL, desired_ask, fair_price, spread_bps, now_ns, ask_qty, defer_submit=True)
+             if order:
+                 new_orders.append(order)
+
+        if new_orders:
+            if len(new_orders) > 1:
+                # Batch submit
+                order_list = self.order_factory.create_list(new_orders)
+                self.submit_order_list(order_list)
+            else:
+                self.submit_order(new_orders[0])
 
         return now_ns + min_interval
 
@@ -452,7 +468,8 @@ class LeadLagMMv3(Strategy):
         spread_bps: Decimal,
         now_ns: int,
         desired_qty: Quantity,
-    ) -> None:
+        defer_submit: bool = False,
+    ) -> Order | None:
         order = self._bid_order if side == OrderSide.BUY else self._ask_order
         order_ts_ns = self._bid_order_ts_ns if side == OrderSide.BUY else self._ask_order_ts_ns
 
@@ -461,7 +478,7 @@ class LeadLagMMv3(Strategy):
             current_qty = order.quantity.as_decimal() if getattr(order, "quantity", None) else None
             if current_qty is not None:
                 if desired_price == current_price and desired_qty.as_decimal() == current_qty:
-                    return
+                    return None
 
         if self._should_replace(
             order,
@@ -485,7 +502,7 @@ class LeadLagMMv3(Strategy):
                         self._bid_order_ts_ns = now_ns
                     else:
                         self._ask_order_ts_ns = now_ns
-                    return
+                    return None
 
                 self.cancel_order(order, client_id=self.client_id)
 
@@ -498,7 +515,6 @@ class LeadLagMMv3(Strategy):
                 time_in_force=self.config.time_in_force,
                 post_only=self.config.post_only,
             )
-            self.submit_order(new_order)
 
             if side == OrderSide.BUY:
                 self._bid_order = new_order
@@ -506,6 +522,13 @@ class LeadLagMMv3(Strategy):
             else:
                 self._ask_order = new_order
                 self._ask_order_ts_ns = now_ns
+
+            if defer_submit:
+                return new_order
+            
+            self.submit_order(new_order)
+        
+        return None
 
     def _should_replace(
         self,
