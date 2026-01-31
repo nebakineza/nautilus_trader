@@ -239,8 +239,8 @@ The **Specialized Low-Capital Strategy significantly outperforms** the scaled-do
 - Specialized Version: `/strategy/hft_obi_bybit_spot_mm_lowcap_v001.py`
 
 **Backtest Results:**
-- Scaled: `backtest_results_lowcap_500/`
-- Specialized: `backtest_results_specialized_lowcap/`
+- Scaled: `outputs/backtests/backtest_results_lowcap_500/`
+- Specialized: `outputs/backtests/backtest_results_specialized_lowcap/`
 
 **Test Date**: January 27, 2026
 **Market Data**: BYBIT BTC-USDT SPOT (January 15, 2026)

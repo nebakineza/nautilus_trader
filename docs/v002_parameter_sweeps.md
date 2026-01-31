@@ -16,12 +16,12 @@ A strong configuration typically has:
 
 ## Enable markouts in the analyzer
 
-If you have Bybit JSONL order book data (`ob_data/..._ob200.data`), generate a mid series:
+If you have Bybit JSONL order book data (`data/ob_data/..._ob200.data`), generate a mid series:
 
 ```bash
 python3 scripts/extract_mid_from_bybit_ob.py \
-  --ob-file ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data \
-  --output-csv backtest_results_v002/mid_btc.csv \
+  --ob-file data/ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data \
+  --output-csv outputs/backtests/backtest_results_v002/mid_btc.csv \
   --instrument-id BTCUSDT-SPOT.BYBIT \
   --min-interval-ms 50
 ```
@@ -30,8 +30,8 @@ Then run the analyzer with markouts:
 
 ```bash
 python3 scripts/analyze_v002_backtest.py \
-  --results-dir backtest_results_v002 \
-  --mid-csv backtest_results_v002/mid_btc.csv \
+  --results-dir outputs/backtests/backtest_results_v002 \
+  --mid-csv outputs/backtests/backtest_results_v002/mid_btc.csv \
   --markout-horizons-ms 250,1000,5000
 ```
 

@@ -20,7 +20,7 @@ nautilus_trader/
 │   ├── professional_hft_mm.py                 # Development version
 │   └── backtest/
 │       └── bybit_orderbook_loader.py          # Order book data loader
-└── run_institutional_hft_backtest.py          # Backtest runner
+└── scripts/runners/run_institutional_hft_backtest.py  # Backtest runner
 ```
 
 ### Strategy Features
@@ -211,13 +211,13 @@ See: `strategy/DESIGN_hft_obi_multipair_ml_v002.md`
 
 - `examples/professional_hft_mm.py` - Development/reference version
 - `examples/backtest/bybit_orderbook_loader.py` - Data loading logic
-- `run_institutional_hft_backtest.py` - Backtest execution engine
+- `scripts/runners/run_institutional_hft_backtest.py` - Backtest execution engine
 - `strategy/README.md` - Detailed strategy documentation
 
 ### Support & Maintenance
 
 For bug reports, optimizations, or strategy enhancements:
-1. Review backtesting results in `backtest_results/`
+1. Review backtesting results in `outputs/backtests/`
 2. Check NautilusTrader documentation
 3. Validate with test data before live deployment
 

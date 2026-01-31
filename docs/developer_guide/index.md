@@ -22,6 +22,7 @@ This approach combines Python's simplicity and ecosystem with Rust's performance
 
 ## Contents
 
+- [Repository Layout](../repo_layout.md)
 - [Environment Setup](environment_setup.md)
 - [Coding Standards](coding_standards.md)
 - [Rust](rust.md)

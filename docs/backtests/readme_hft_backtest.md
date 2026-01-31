@@ -28,7 +28,7 @@ This is a **production-grade institutional high-frequency trading (HFT) backtest
    - InstitutionalFillModel (85% queue, 5% slip, 30% liquidity)
    - Professional execution quality simulation
 
-4. **[run_institutional_hft_backtest.py](run_institutional_hft_backtest.py)** - 390 lines
+4. **[scripts/runners/run_institutional_hft_backtest.py](../../scripts/runners/run_institutional_hft_backtest.py)** - 390 lines
    - Production-ready backtest runner
    - Engine configuration, data loading, strategy initialization
    - CSV report generation
@@ -36,11 +36,11 @@ This is a **production-grade institutional high-frequency trading (HFT) backtest
 
 ### Testing & Documentation (3 files)
 
-5. **[validate_hft_backtest.py](validate_hft_backtest.py)** - 312 lines
+5. **[scripts/analysis/validate_hft_backtest.py](../../scripts/analysis/validate_hft_backtest.py)** - 312 lines
    - Comprehensive validation test suite
    - Result: **4/4 TESTS PASSED** ✅
 
-6. **[INSTITUTIONAL_HFT_BACKTEST.md](INSTITUTIONAL_HFT_BACKTEST.md)** - 450+ lines
+6. **[institutional_hft_backtest.md](institutional_hft_backtest.md)** - 450+ lines
    - Complete professional documentation
    - Configuration guide, performance metrics, FAQ
 
@@ -54,17 +54,17 @@ This is a **production-grade institutional high-frequency trading (HFT) backtest
 
 ```bash
 # Step 1: Validate all components
-python3 validate_hft_backtest.py
+python3 scripts/analysis/validate_hft_backtest.py
 
 # Step 2: Run test backtest (10k updates, ~30 seconds)
-python3 run_institutional_hft_backtest.py --test --max-updates 10000
+python3 scripts/runners/run_institutional_hft_backtest.py --test --max-updates 10000
 
 # Step 3: Run full single day backtest (~5-10 minutes)
-python3 run_institutional_hft_backtest.py --date 2026-01-15
+python3 scripts/runners/run_institutional_hft_backtest.py --date 2026-01-15
 
 # Step 4: View results
-cat backtest_results/account_report.csv
-cat backtest_results/fills_report.csv
+cat outputs/backtests/backtest_results/account_report.csv
+cat outputs/backtests/backtest_results/fills_report.csv
 ```
 
 ---
@@ -140,7 +140,7 @@ Edit `examples/backtest/institutional_models.py`:
 - Liquidity factor: `liquidity_factor`
 
 ### Engine (capital)
-Edit `run_institutional_hft_backtest.py`:
+Edit `scripts/runners/run_institutional_hft_backtest.py`:
 - Starting capital: `starting_balances`
 - Trading dates: `--date` parameter
 - Data limits: `--max-updates` for testing
@@ -149,7 +149,7 @@ Edit `run_institutional_hft_backtest.py`:
 
 ## 📚 Documentation
 
-- **[INSTITUTIONAL_HFT_BACKTEST.md](INSTITUTIONAL_HFT_BACKTEST.md)** - Full reference guide
+- **[institutional_hft_backtest.md](institutional_hft_backtest.md)** - Full reference guide
 - **[QUICK_REFERENCE.py](QUICK_REFERENCE.py)** - Quick start and configuration
 - Code comments - Extensive inline documentation
 
@@ -159,18 +159,18 @@ Edit `run_institutional_hft_backtest.py`:
 
 **Fast Testing**: 10k updates (~30 seconds)
 ```bash
-python3 run_institutional_hft_backtest.py --test --max-updates 10000
+python3 scripts/runners/run_institutional_hft_backtest.py --test --max-updates 10000
 ```
 
 **Full Backtest**: All updates (~5-10 minutes per day)
 ```bash
-python3 run_institutional_hft_backtest.py
+python3 scripts/runners/run_institutional_hft_backtest.py
 ```
 
 **Multi-Day**: Run sequentially and aggregate results
 ```bash
 for date in 2026-01-15 2026-01-16 2026-01-17 2026-01-18 2026-01-19 2026-01-20 2026-01-21; do
-    python3 run_institutional_hft_backtest.py --date $date
+   python3 scripts/runners/run_institutional_hft_backtest.py --date $date
 done
 ```
 
@@ -207,10 +207,10 @@ A: Not directly. This is backtesting only. Validate profitability first, then pa
 
 ## 📝 Next Steps
 
-1. Run validation: `python3 validate_hft_backtest.py`
-2. Test with limited data: `python3 run_institutional_hft_backtest.py --test`
-3. Run full backtest: `python3 run_institutional_hft_backtest.py`
-4. Analyze results: `cat backtest_results/*.csv`
+1. Run validation: `python3 scripts/analysis/validate_hft_backtest.py`
+2. Test with limited data: `python3 scripts/runners/run_institutional_hft_backtest.py --test`
+3. Run full backtest: `python3 scripts/runners/run_institutional_hft_backtest.py`
+4. Analyze results: `cat outputs/backtests/backtest_results/*.csv`
 5. Customize parameters based on results
 6. Paper trade on Bybit testnet
 7. Deploy live with position limits and monitoring

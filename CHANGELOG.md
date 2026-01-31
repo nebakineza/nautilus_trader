@@ -16,7 +16,7 @@ All changes below were made after cloning `nautilus_trader` into `~/nebakineza/n
   - `examples/backtest/hft_metrics.py` — post-backtest metrics helpers (Sharpe, fill ratio, markout, inventory duration)
 
 - Documentation and guides
-  - Updated `examples/README.md` with a Backtesting Guide and linked `01-backtesting.md`
+  - Updated `examples/README.md` with a Backtesting Guide and linked `docs/guides/backtesting.md`
   - `docs/grafana_monitoring.md` — short Grafana / InfluxDB monitoring guide and heartbeat recommendations
 
 ## Modifications

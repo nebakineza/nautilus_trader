@@ -84,20 +84,20 @@ InstitutionalMMConfig(
 - P99: 476.0μs
 
 ### 4. **Comprehensive Backtest Runner**
-**File**: `run_institutional_hft_backtest.py`
+**File**: `scripts/runners/run_institutional_hft_backtest.py`
 
 Production-ready backtesting framework:
 
 ```bash
 # Test mode (1000 updates)
-python3 run_institutional_hft_backtest.py --test --max-updates 1000
+python3 scripts/runners/run_institutional_hft_backtest.py --test --max-updates 1000
 
 # Single day backtest
-python3 run_institutional_hft_backtest.py --date 2026-01-15
+python3 scripts/runners/run_institutional_hft_backtest.py --date 2026-01-15
 
 # Full 7-day backtest
 for date in 2026-01-15 2026-01-16 2026-01-17 2026-01-18 2026-01-19 2026-01-20 2026-01-21; do
-    python3 run_institutional_hft_backtest.py --date $date
+    python3 scripts/runners/run_institutional_hft_backtest.py --date $date
 done
 ```
 
@@ -110,12 +110,12 @@ done
 6. ✅ Generate reports (CSV)
 
 ### 5. **Validation Test Suite**
-**File**: `validate_hft_backtest.py`
+**File**: `scripts/analysis/validate_hft_backtest.py`
 
 Comprehensive validation of all components:
 
 ```bash
-python3 validate_hft_backtest.py
+python3 scripts/analysis/validate_hft_backtest.py
 ```
 
 **Tests** (All Passed ✅):
@@ -142,7 +142,7 @@ python3 validate_hft_backtest.py
 
 **Sample File Structure**:
 ```
-ob_data/BTCUSDT_Spot/
+data/ob_data/BTCUSDT_Spot/
 ├── 2026-01-15_BTCUSDT_ob200.data       (287 MB, 1 snapshot + 99 deltas shown)
 ├── 2026-01-16_BTCUSDT_ob200.data       (244 MB)
 ├── 2026-01-17_BTCUSDT_ob200.data       (166 MB)
@@ -158,27 +158,27 @@ ob_data/BTCUSDT_Spot/
 
 ### Step 1: Validate Everything
 ```bash
-python3 validate_hft_backtest.py
+python3 scripts/analysis/validate_hft_backtest.py
 ```
 
 Expected output: All 4 tests PASS ✅
 
 ### Step 2: Run Test Backtest (10k updates = ~30 seconds)
 ```bash
-python3 run_institutional_hft_backtest.py --test --max-updates 10000
+python3 scripts/runners/run_institutional_hft_backtest.py --test --max-updates 10000
 ```
 
 ### Step 3: Run Full Single Day (all updates ~5-10 minutes)
 ```bash
-python3 run_institutional_hft_backtest.py --date 2026-01-15
+python3 scripts/runners/run_institutional_hft_backtest.py --date 2026-01-15
 ```
 
 ### Step 4: Check Results
 ```bash
-ls -lh backtest_results/
-cat backtest_results/account_report.csv
-cat backtest_results/fills_report.csv
-cat backtest_results/positions_report.csv
+ls -lh outputs/backtests/backtest_results/
+cat outputs/backtests/backtest_results/account_report.csv
+cat outputs/backtests/backtest_results/fills_report.csv
+cat outputs/backtests/backtest_results/positions_report.csv
 ```
 
 ---
@@ -330,9 +330,9 @@ examples/
 │   └── ...
 
 root/
-├── run_institutional_hft_backtest.py   # Main backtest runner
-├── validate_hft_backtest.py            # Validation test suite
-└── backtest_results/                   # Output CSV reports
+├── scripts/runners/run_institutional_hft_backtest.py   # Main backtest runner
+├── scripts/analysis/validate_hft_backtest.py            # Validation test suite
+└── outputs/backtests/backtest_results/  # Output CSV reports
     ├── account_report.csv
     ├── fills_report.csv
     └── positions_report.csv

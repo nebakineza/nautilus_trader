@@ -12,8 +12,15 @@ Key directories:
 - `examples/backtest/` — backtest scripts and loaders.
 - `examples/live/` — live runners (staged only).
 - `scripts/` — data ingest/sync tooling.
-- `ob_data_live/` — synced live order book data (local, not committed).
-- `backtest_results*/` — outputs (local, not committed).
+- `data/ob_data_live/` — synced live order book data (local, not committed).
+- `outputs/backtests/` — backtest outputs (local, not committed).
+
+## STRICT: Python Environment
+- ALWAYS use the project virtual environment at `/home/seb/nebakineza/nautilus_trader/.venv`.
+- Never call `python` or `pip` directly.
+- Use:
+  - `/home/seb/nebakineza/nautilus_trader/.venv/bin/python`
+  - `/home/seb/nebakineza/nautilus_trader/.venv/bin/pip`
 
 ## Lead/Lag MM v003
 Primary strategy file:
@@ -32,7 +39,7 @@ Key config knobs:
 ### v003 Multi-symbol Live (staged only)
 - `examples/live/bybit/bybit_lead_lag_mm_multi_v3.py`
 - Uses per-symbol liquidity thresholds and sizes.
-- VPS runner: `run_live_trading_multi_v3.py` (deployed under `/home/ubuntu/trading`).
+- VPS runner: `scripts/runners/run_live_trading_multi_v3.py` (deployed under `/home/ubuntu/trading`).
 
 ## Backtesting
 Single-pair v003 backtest:
@@ -53,7 +60,7 @@ Multi-symbol v003 backtest:
 
 ## Data Pipeline
 1. **VPS capture** produces L2 deltas (`*.data`) for BINANCE/BYBIT.
-2. **Local sync** pulls data to `ob_data_live/`.
+2. **Local sync** pulls data to `data/ob_data_live/`.
 3. **QuestDB ingest** loads deltas into `orderbook_deltas`.
 4. **Backtest** queries QuestDB by symbol + venue + date.
 
@@ -65,7 +72,7 @@ Multi-symbol v003 backtest:
 ### Ingest Script
 - `scripts/questdb_ingest_ob_data.py`
   - Example:
-    - `python scripts/questdb_ingest_ob_data.py --data-dir ob_data_live --host 127.0.0.1 --port 9009`
+    - `python scripts/questdb_ingest_ob_data.py --data-dir data/ob_data_live --host 127.0.0.1 --port 9009`
 
 ## QuestDB Setup
 Local Docker is used:
@@ -73,22 +80,24 @@ Local Docker is used:
 - ILP: 9009
 
 Start (example):
-- `docker run -d --name questdb -p 9000:9000 -p 9009:9009 -v ./questdb:/root/.questdb questdb/questdb:latest`
+- `docker run -d --name questdb -p 9000:9000 -p 9009:9009 -v ./data/questdb:/root/.questdb questdb/questdb:latest`
 
 ## Operational Notes
-- `.gitignore` excludes `ob_data*`, `backtest_results*`, `tick_data`, `sweep_results`, `logs`.
+- `.gitignore` excludes `data/ob_data*`, `data/tick_data*`, `outputs/`, `logs`.
 - Use `log_guard_events=False` for noise reduction in multi backtests.
 - Dynamic sizes must respect instrument size precision (min order sizing).
+- v003 enforces a dynamic size floor of 20% of `order_qty` plus `min_order_qty`.
+- Equity drawdown killswitch is enabled in v003 (`max_drawdown_pct`, default 5%).
 - Live v003 is managed via systemd service `leadlag-v003.service` on the VPS.
-- **Reconciliation:** Disabled in `run_live_trading_multi_v3.py` to prevent startup churn on large accounts.
+- **Reconciliation:** Enabled in `scripts/runners/run_live_trading_multi_v3.py` for live sync.
 - **Inventory:** Strategy follows strict inventory management with skewing to offload positions (target=0).
 
 ## Lead-Lag & Rate Limits
 - **Latency:** Strategy uses `recv_window=20000` to prevent Bybit API timeouts.
 - **Rate Limits:** Quote refresh intervals are staggered to avoid API bans:
-  - BTC: 200ms
-  - ETH: 600ms
-  - SOL: 600ms
+  - BTC: 400ms
+  - ETH: 1000ms
+  - SOL: 1000ms
 - **Event-Driven:** Strategy refreshes quotes immediately on BOTH Leader (Binance) and Follower (Bybit) book updates to minimize latency, subject to the rate limits above.
 
 ## Known Constraints / Gotchas

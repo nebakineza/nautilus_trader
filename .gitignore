@@ -63,11 +63,16 @@ __pycache__/
 .pytest_cache/
 
 # Local data outputs
-backtest_results*/
-ob_data/
-ob_data_live/
-tick_data/
-sweep_results/
+outputs/backtests/
+outputs/exports/
+outputs/sweeps/
+outputs/optuna/
+data/ob_data/
+data/ob_data_live/
+data/tick_data/
+data/tick_data_live/
+data/questdb/
+data/questdb_vps_backup/
 logs/
 
 # Large data files

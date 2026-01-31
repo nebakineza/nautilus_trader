@@ -26,9 +26,9 @@ Files Created:
   ✓ .env.template                   (Config template)
 
 Documentation:
-  ✓ DEPLOYMENT_INSTRUCTIONS.md      (Detailed guide)
-  ✓ DEPLOYMENT_SUMMARY.txt          (Overview)
-  ✓ READY_TO_DEPLOY.txt             (This file)
+  ✓ deployment_instructions.md      (Detailed guide)
+  ✓ deployment_summary.txt          (Overview)
+  ✓ ready_to_deploy.txt             (This file)
 
 
 🚀 DEPLOYMENT EXECUTION (3 SIMPLE STEPS)
@@ -214,9 +214,9 @@ Graceful Stop (from trading terminal):
 ══════════════════════════════════════════════════════════════════════════════
 
 Documentation Files:
-  • DEPLOYMENT_INSTRUCTIONS.md   (Complete detailed guide)
-  • DEPLOYMENT_SUMMARY.txt       (Phase overview)
-  • LOWCAP_COMPARISON.md         (Strategy comparison)
+  • deployment_instructions.md   (Complete detailed guide)
+  • deployment_summary.txt       (Phase overview)
+  • ../analysis/lowcap_comparison.md         (Strategy comparison)
   • README.md                    (General documentation)
 
 Log Files (after deployment):
@@ -288,7 +288,7 @@ Next Action:
   6. Configure API credentials when prompted
   7. Start trading with BYBIT_TESTNET=true
 
-Questions? Check DEPLOYMENT_INSTRUCTIONS.md for detailed troubleshooting.
+Questions? Check deployment_instructions.md for detailed troubleshooting.
 
 Good luck! 🚀
 

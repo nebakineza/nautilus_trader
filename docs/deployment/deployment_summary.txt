@@ -27,8 +27,8 @@ SUPPORT FILES:
 ──────────────
 
 ✓ .env.template                    - Environment configuration template
-✓ DEPLOYMENT_INSTRUCTIONS.md        - Detailed deployment guide
-✓ DEPLOYMENT_SUMMARY.txt            - This file
+✓ deployment_instructions.md        - Detailed deployment guide
+✓ deployment_summary.txt            - This file
 
 STRATEGY FILES (Already prepared):
 ──────────────────────────────────
@@ -41,7 +41,7 @@ STRATEGY FILES (Already prepared):
 COMPARISON REPORT:
 ──────────────────
 
-✓ LOWCAP_COMPARISON.md
+✓ ../analysis/lowcap_comparison.md
    - Detailed comparison: scaled vs specialized strategy
    - 343% performance improvement documented
    - Professional-grade returns with $500 capital
@@ -269,7 +269,7 @@ AFTER DEPLOYMENT:
 📞 SUPPORT & TROUBLESHOOTING
 ════════════════════════════════════════════════════════════════════════════
 
-For detailed troubleshooting, see: DEPLOYMENT_INSTRUCTIONS.md
+For detailed troubleshooting, see: deployment_instructions.md
 
 Common Issues:
   - SSH connection refused: Check security group, IP address
@@ -356,7 +356,7 @@ All scripts are created, tested, and ready to deploy.
 
 Next Step:
   1. Run the three-step quick start above, OR
-  2. Follow the detailed instructions in DEPLOYMENT_INSTRUCTIONS.md, OR
+  2. Follow the detailed instructions in deployment_instructions.md, OR
   3. Execute individual phases as needed
 
 Good luck with your live trading! Remember to start with testnet.

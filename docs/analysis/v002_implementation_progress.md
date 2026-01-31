@@ -42,7 +42,7 @@ strategy/
 
 /
 ├── run_multipair_backtest_v002.py                  # Backtest runner
-├── deploy_v002_phase1.sh                           # Deployment script
+├── deploy/deploy_v002_phase1.sh                    # Deployment script
 └── (AWS) run_live_multipair_v002.py                # Live trading runner
 ```
 
@@ -336,7 +336,7 @@ Successfully validated full quote generation flow:
 - Hedging opportunity detection
 
 #### Backtest Framework
-Created `backtest_v002_runner.py`:
+Created `scripts/runners/backtest_v002_runner.py`:
 - Backtest engine configuration ✓
 - Multi-venue support (BYBIT) ✓
 - Multi-instrument setup ✓
@@ -591,7 +591,7 @@ V002 delivers **professional-grade market making** with 4-6x better risk-adjuste
 
 ✅ **Deploy V002 for production** - Superior risk-adjusted returns with professional infrastructure.
 
-📄 **Full Analysis**: See [V001_VS_V002_COMPARISON.md](V001_VS_V002_COMPARISON.md)
+📄 **Full Analysis**: See [v001_vs_v002_comparison.md](v001_vs_v002_comparison.md)
 
 ---
 
