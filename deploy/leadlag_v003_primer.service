@@ -1,0 +1,19 @@
+[Unit]
+Description=Lead-Lag MM v003 Primer (VIP1) on Bybit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading
+EnvironmentFile=/home/ubuntu/trading/.env
+Environment=PYTHONPATH=/home/ubuntu/trading
+ExecStart=/home/ubuntu/trading/nautilus_env/bin/python /home/ubuntu/trading/scripts/runners/run_live_trading_multi_v3_primer.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/trading/logs/leadlag_multi_v3_primer_stdout.log
+StandardError=append:/home/ubuntu/trading/logs/leadlag_multi_v3_primer_stdout.log
+
+[Install]
+WantedBy=multi-user.target

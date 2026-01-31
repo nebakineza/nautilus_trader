@@ -1,0 +1,18 @@
+[Unit]
+Description=Capture DOT/LINK Bybit Spot orderbook + ticks
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/trading
+ExecStart=/home/ubuntu/trading/nautilus_env/bin/python /home/ubuntu/trading/scripts/runners/run_capture_bybit_dot_link.py
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/ubuntu/trading/logs/capture_dot_link.log
+StandardError=append:/home/ubuntu/trading/logs/capture_dot_link.log
+
+[Install]
+WantedBy=multi-user.target
