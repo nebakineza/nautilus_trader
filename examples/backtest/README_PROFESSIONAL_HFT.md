@@ -11,8 +11,8 @@ This directory contains the backtest setup for the `InstitutionalHFT` strategy f
 
 ## Data Structure
 
-- **Trade Data**: `tick_data/BTCUSDT_Spot/` - CSV.gz files with columns: id, timestamp, price, volume, side, rpi
-- **Order Book Data**: `ob_data/BTCUSDT_Spot/` - JSON files with order book deltas (200 levels)
+- **Trade Data**: `data/tick_data/BTCUSDT_Spot/` - CSV.gz files with columns: id, timestamp, price, volume, side, rpi
+- **Order Book Data**: `data/ob_data/BTCUSDT_Spot/` - JSON files with order book deltas (200 levels)
 
 ## Manual Backtest Setup
 
@@ -29,7 +29,7 @@ The `examples/backtest/crypto_orderbook_imbalance.py` is a working example. Modi
 from examples.backtest.custom_trade_loader import CustomTradeLoader
 
 df_trades = CustomTradeLoader.load(
-    "tick_data/BTCUSDT_Spot/BTCUSDT_2026-01-15.csv.gz",
+    "data/tick_data/BTCUSDT_Spot/BTCUSDT_2026-01-15.csv.gz",
     "BTCUSDT-SPOT.BYBIT"
 )
 
@@ -38,7 +38,7 @@ import json
 import pandas as pd
 
 rows = []
-with open("ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data", 'r') as f:
+with open("data/ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data", 'r') as f:
     for line in f:
         obj = json.loads(line.strip())
         # Process order book data...
@@ -94,7 +94,7 @@ engine.add_instrument(BTCUSDT)
 
 # Load and add trade data
 df_trades = CustomTradeLoader.load(
-    "tick_data/BTCUSDT_Spot/BTCUSDT_2026-01-15.csv.gz",
+    "data/tick_data/BTCUSDT_Spot/BTCUSDT_2026-01-15.csv.gz",
     "BTCUSDT-SPOT.BYBIT"
 )
 

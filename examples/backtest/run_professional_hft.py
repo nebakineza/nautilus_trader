@@ -21,8 +21,8 @@ from examples.backtest.custom_trade_loader import CustomTradeLoader
 def main():
     TRADER_ID = TraderId("HFT-BACKTESTER-001")
     INSTRUMENT_ID = "BTCUSDT-SPOT.BYBIT"
-    TICK_DATA_DIR = Path("tick_data/BTCUSDT_Spot")
-    OB_DATA_DIR = Path("ob_data/BTCUSDT_Spot")
+    TICK_DATA_DIR = Path("data/tick_data/BTCUSDT_Spot")
+    OB_DATA_DIR = Path("data/ob_data/BTCUSDT_Spot")
     
     MAX_TRADE_ROWS = 100000
     

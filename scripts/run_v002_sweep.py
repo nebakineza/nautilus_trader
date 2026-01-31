@@ -2,7 +2,7 @@
 """Sweep runner for the v002 strategy (BTC/ETH, single-instrument data).
 
 This script generates a finite grid of `MultiPairMMConfig` overrides, runs
-`run_v002_backtest.py` per config, then ranks results using
+`scripts/runners/run_v002_backtest.py` per config, then ranks results using
 `scripts/analyze_v002_backtest.py`.
 
 Design goals:
@@ -11,8 +11,8 @@ Design goals:
 - Uses existing runner/analyzer so backtest logic stays in one place
 
 Notes:
-- The repo currently includes BTC order book data under `ob_data/BTCUSDT_Spot/`.
-  If you add ETH order book data under `ob_data/ETHUSDT_Spot/`, the same sweep
+- The repo currently includes BTC order book data under `data/ob_data/BTCUSDT_Spot/`.
+    If you add ETH order book data under `data/ob_data/ETHUSDT_Spot/`, the same sweep
   script can run ETH too via `--instrument-id ETHUSDT-SPOT.BYBIT`.
 
 Example:
@@ -223,7 +223,7 @@ def main() -> int:
     else:
         stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         symbol = args.instrument_id.split("-")[0].lower()
-        output_root = repo_root / "sweep_results" / f"v002_{symbol}_{stamp}_{args.preset}"
+        output_root = repo_root / "outputs/sweeps" / f"v002_{symbol}_{stamp}_{args.preset}"
     output_root.mkdir(parents=True, exist_ok=True)
 
     grid = _build_grid(args.preset, args.instrument_id)
@@ -246,7 +246,7 @@ def main() -> int:
 
     # Mid series for markouts
     symbol = args.instrument_id.split("-")[0]  # BTCUSDT / ETHUSDT
-    ob_file = repo_root / f"ob_data/{symbol}_Spot/{args.date}_{symbol}_ob200.data"
+    ob_file = repo_root / f"data/ob_data/{symbol}_Spot/{args.date}_{symbol}_ob200.data"
     mid_csv = Path(args.mid_csv) if args.mid_csv else (output_root / f"mid_{symbol}_{args.date}.csv")
     if not args.mid_csv and ob_file.exists() and not mid_csv.exists():
         print(f"Generating mid CSV: {mid_csv}")
@@ -282,7 +282,7 @@ def main() -> int:
         _run(
             [
                 py,
-                str(repo_root / "run_v002_backtest.py"),
+                str(repo_root / "scripts/runners/run_v002_backtest.py"),
                 "--date",
                 args.date,
                 "--max-updates",

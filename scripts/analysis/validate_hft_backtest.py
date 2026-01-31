@@ -17,7 +17,7 @@ def test_orderbook_loader():
     print("TEST 1: ORDER BOOK LOADER")
     print("="*70)
     
-    ob_file = Path("ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data")
+    ob_file = Path("data/ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data")
     
     if not ob_file.exists():
         print(f"✗ Order book file not found: {ob_file}")
@@ -206,8 +206,8 @@ def test_file_structure():
         "examples/backtest/bybit_orderbook_loader.py",
         "examples/professional_hft_mm.py",
         "examples/backtest/institutional_models.py",
-        "run_institutional_hft_backtest.py",
-        "ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data",
+        "scripts/runners/run_institutional_hft_backtest.py",
+        "data/ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data",
     ]
     
     all_exist = True
@@ -256,8 +256,8 @@ def main():
     if passed == total:
         print(f"\n✓ ALL VALIDATION TESTS PASSED")
         print(f"\nYou are ready to run:")
-        print(f"  python3 run_institutional_hft_backtest.py --test --max-updates 10000")
-        print(f"  python3 run_institutional_hft_backtest.py")
+        print("  python3 scripts/runners/run_institutional_hft_backtest.py --test --max-updates 10000")
+        print("  python3 scripts/runners/run_institutional_hft_backtest.py")
         return 0
     else:
         print(f"\n✗ SOME TESTS FAILED")

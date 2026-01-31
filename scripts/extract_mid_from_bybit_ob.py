@@ -18,8 +18,8 @@ Output columns:
 
 Example:
   python3 scripts/extract_mid_from_bybit_ob.py \
-    --ob-file ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data \
-    --output-csv backtest_results_v002/mid.csv \
+        --ob-file data/ob_data/BTCUSDT_Spot/2026-01-15_BTCUSDT_ob200.data \
+        --output-csv outputs/backtests/backtest_results_v002/mid.csv \
     --instrument-id BTCUSDT-SPOT.BYBIT \
     --min-interval-ms 10
 """

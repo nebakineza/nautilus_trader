@@ -168,7 +168,7 @@ def load_orderbook_data(
     print("=" * 70)
     
     symbol = str(instrument.raw_symbol)
-    ob_file = Path(f"ob_data/{symbol}_Spot/{date_str}_{symbol}_ob200.data")
+    ob_file = Path(f"data/ob_data/{symbol}_Spot/{date_str}_{symbol}_ob200.data")
     ob_zip = Path(str(ob_file) + ".zip")
     
     if not ob_file.exists():
@@ -502,7 +502,7 @@ def main() -> int:
     ap.add_argument("--max-updates", type=int, default=50000)
     ap.add_argument("--instrument-id", type=str, default="BTCUSDT-SPOT.BYBIT")
     ap.add_argument("--config-json", type=str, default=None)
-    ap.add_argument("--output-dir", type=str, default="backtest_results_v002")
+    ap.add_argument("--output-dir", type=str, default="outputs/backtests/backtest_results_v002")
     args = ap.parse_args()
 
     print("\n")
@@ -562,8 +562,8 @@ def main() -> int:
     print("V002 BACKTEST COMPLETE")
     print("=" * 70)
     print("\nCompare results:")
-    print("  V001: backtest_results_specialized_lowcap/")
-    print("  V002: backtest_results_v002/")
+    print("  V001: outputs/backtests/backtest_results_specialized_lowcap/")
+    print("  V002: outputs/backtests/backtest_results_v002/")
     print()
     
     return 0

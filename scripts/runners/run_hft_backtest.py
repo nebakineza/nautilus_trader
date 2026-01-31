@@ -22,7 +22,7 @@ def main():
     # Configuration
     TRADER_ID = TraderId("HFT-BACKTESTER-001")
     INSTRUMENT_ID = "BTCUSDT.BINANCE"  # Use Binance to match test provider
-    TICK_DATA_DIR = Path("tick_data/BTCUSDT_Spot")
+    TICK_DATA_DIR = Path("data/tick_data/BTCUSDT_Spot")
     
     MAX_TRADE_ROWS = 100000  # Limit for faster testing
     
@@ -134,8 +134,8 @@ def main():
         print(positions_report)
     
     # Save results to CSV
-    results_dir = Path("backtest_results")
-    results_dir.mkdir(exist_ok=True)
+    results_dir = Path("outputs/backtests/backtest_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
     
     account_df = engine.trader.generate_account_report(binance_venue)
     account_path = results_dir.joinpath("account_report.csv")

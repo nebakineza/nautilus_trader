@@ -117,7 +117,7 @@ def load_orderbook_data(
             if max_updates and count >= max_updates:
                 break
     else:
-        base_dir = data_dir if data_dir is not None else Path("ob_data")
+        base_dir = data_dir if data_dir is not None else Path("data/ob_data")
         ob_file = base_dir / f"{symbol}_Spot" / f"{date_str}_{symbol}_ob{depth}.data"
         if not ob_file.exists():
             raise FileNotFoundError(f"Order book file not found: {ob_file}")
@@ -288,8 +288,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-updates", type=int, default=5_000, help="Max deltas per venue.")
     parser.add_argument(
         "--data-dir",
-        default="ob_data",
-        help="Base directory for order book data (default: ob_data).",
+        default="data/ob_data",
+        help="Base directory for order book data (default: data/ob_data).",
     )
     parser.add_argument(
         "--depth",

@@ -27,7 +27,7 @@ from examples.professional_hft import ProfessionalHFTConfig, InstitutionalHFT
 # If you have local tick data, point `TICK_DATA_DIR` to it. The runner will
 # automatically add all files matching *_ob200.data as orderbook deltas and
 # *_trades.data as trades. Adjust patterns as needed for your files.
-TICK_DATA_DIR = os.path.expanduser("~/nebakineza/tick_data/BTCUSDT_Spot")
+TICK_DATA_DIR = os.path.expanduser("~/nebakineza/nautilus_trader/data/tick_data/BTCUSDT_Spot")
 
 
 

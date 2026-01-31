@@ -3,7 +3,7 @@
 
 Usage:
   python scripts/questdb_ingest_ob_data.py \
-    --data-dir /home/seb/nebakineza/nautilus_trader/ob_data \
+        --data-dir /home/seb/nebakineza/nautilus_trader/data/ob_data \
     --host 127.0.0.1 --port 9009
 """
 

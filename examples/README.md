@@ -54,4 +54,4 @@ engine = BacktestEngine(config=config)
 - **Logs & results**: examples typically print or save results; search `examples/backtest` for `BacktestEngine` usage to find output handling (reports, PnL, trades).
 
 If you want, I can add a dedicated backtest runner that exercises `examples/professional_hft.py` against a small sample dataset and commits it into `examples/backtest/`.
-Also see the institutional backtesting write-up at the repository root: [01-backtesting.md](../01-backtesting.md)
+Also see the institutional backtesting write-up: [docs/guides/backtesting.md](../docs/guides/backtesting.md)

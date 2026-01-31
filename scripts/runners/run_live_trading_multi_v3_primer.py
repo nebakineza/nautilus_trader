@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live multi-symbol Lead-Lag MM v3 with dynamic sizing and guard rails."""
+"""Live multi-symbol Lead-Lag MM v3 Primer (VIP1 acquisition profile)."""
 
 import os
 from decimal import Decimal
@@ -23,21 +23,15 @@ from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.config import LiveRiskEngineConfig
 from nautilus_trader.live.node import TradingNode
 from nautilus_trader.model.enums import BookType
-from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.identifiers import TraderId
 from nautilus_trader.model.venues import Venue
 from nautilus_trader.portfolio.config import PortfolioConfig
 
-import sys
-
-try:
-    from strategy.lead_lag_bybit_binance_mm_v003 import LeadLagMMv3
-    from strategy.lead_lag_bybit_binance_mm_v003 import LeadLagMMv3Config
-except ModuleNotFoundError:
-    sys.path.insert(0, "/home/ubuntu/trading")
-    from lead_lag_bybit_binance_mm_v003 import LeadLagMMv3
-    from lead_lag_bybit_binance_mm_v003 import LeadLagMMv3Config
+from strategy.lead_lag_bybit_binance_mm_v003_primer import (
+    LeadLagMMv3Primer,
+    LeadLagMMv3PrimerConfig,
+)
 
 BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
 BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
@@ -48,40 +42,49 @@ if not BYBIT_API_KEY or not BYBIT_API_SECRET:
 
 pairs = [
     {
-        "symbol": "BTCUSDT",
-        "order_qty": Decimal("0.0001"),
-        "max_position_qty": Decimal("0.001"),
+        "symbol": "SOLUSDT",
+        "order_qty": Decimal("0.4"),
+        "min_order_qty": Decimal("0.4"),
+        "max_position_qty": Decimal("5.0"),
         "guard_threshold_bps": Decimal("10.0"),
         "spread_bps": Decimal("16.0"),
         "global_guard_id": None,
-        "refresh_interval": 200,
+        "refresh_interval": 1000,
         "refresh_offset": 0,
-        "liquidity_high_qty": Decimal("5.0"),
-        "liquidity_low_qty": Decimal("0.1"),
-    },
-    {
-        "symbol": "ETHUSDT",
-        "order_qty": Decimal("0.002"),
-        "max_position_qty": Decimal("0.02"),
-        "guard_threshold_bps": Decimal("10.0"),
-        "spread_bps": Decimal("16.0"),
-        "global_guard_id": "BTCUSDT.BINANCE_SPOT",
-        "refresh_interval": 600,
-        "refresh_offset": 33,
-        "liquidity_high_qty": Decimal("80.0"),
-        "liquidity_low_qty": Decimal("5.0"),
-    },
-    {
-        "symbol": "SOLUSDT",
-        "order_qty": Decimal("0.1"),
-        "max_position_qty": Decimal("1.0"),
-        "guard_threshold_bps": Decimal("10.0"),
-        "spread_bps": Decimal("20.0"),
-        "global_guard_id": "BTCUSDT.BINANCE_SPOT",
-        "refresh_interval": 600,
-        "refresh_offset": 66,
         "liquidity_high_qty": Decimal("1000.0"),
         "liquidity_low_qty": Decimal("50.0"),
+        "ofi_enabled": True,
+        "ofi_max_bps": Decimal("15.0"),
+    },
+    {
+        "symbol": "DOGEUSDT",
+        "order_qty": Decimal("300"),
+        "min_order_qty": Decimal("300"),
+        "max_position_qty": Decimal("5000"),
+        "guard_threshold_bps": Decimal("12.0"),
+        "spread_bps": Decimal("16.0"),
+        "global_guard_id": "SOLUSDT.BINANCE_SPOT",
+        "refresh_interval": 1000,
+        "refresh_offset": 33,
+        "liquidity_high_qty": Decimal("200000"),
+        "liquidity_low_qty": Decimal("20000"),
+        "ofi_enabled": True,
+        "ofi_max_bps": Decimal("15.0"),
+    },
+    {
+        "symbol": "AVAXUSDT",
+        "order_qty": Decimal("3.0"),
+        "min_order_qty": Decimal("3.0"),
+        "max_position_qty": Decimal("50.0"),
+        "guard_threshold_bps": Decimal("12.0"),
+        "spread_bps": Decimal("16.0"),
+        "global_guard_id": "SOLUSDT.BINANCE_SPOT",
+        "refresh_interval": 1000,
+        "refresh_offset": 66,
+        "liquidity_high_qty": Decimal("5000.0"),
+        "liquidity_low_qty": Decimal("200.0"),
+        "ofi_enabled": True,
+        "ofi_max_bps": Decimal("15.0"),
     },
 ]
 
@@ -93,20 +96,20 @@ global_guard_ids = [
 ]
 
 config_node = TradingNodeConfig(
-    trader_id=TraderId("LEADLAG-MULTI-003"),
+    trader_id=TraderId("LEADLAG-MULTI-003-PRIMER"),
     logging=LoggingConfig(
         log_level="INFO",
         log_level_file="INFO",
-        log_directory=".",
-        log_file_name="leadlag_multi_v3_live.log",
+        log_directory="/home/ubuntu/trading/logs",
+        log_file_name="leadlag_multi_v3_primer_live.log",
         clear_log_file=False,
         use_pyo3=True,
     ),
     exec_engine=LiveExecEngineConfig(
-        reconciliation=False,
+        reconciliation=True,
         reconciliation_instrument_ids=follower_ids,
-        open_check_interval_secs=5.0,
-        position_check_interval_secs=5.0,
+        open_check_interval_secs=2.0,
+        position_check_interval_secs=2.0,
         graceful_shutdown_on_exception=True,
     ),
     risk_engine=LiveRiskEngineConfig(bypass=False),
@@ -164,7 +167,7 @@ config_node = TradingNodeConfig(
         ),
     },
     timeout_connection=20.0,
-    timeout_reconciliation=10.0,
+    timeout_reconciliation=20.0,
     timeout_portfolio=10.0,
     timeout_disconnection=10.0,
     timeout_post_stop=5.0,
@@ -177,7 +180,7 @@ for pair in pairs:
     follower_id = InstrumentId.from_str(f"{pair['symbol']}-SPOT.BYBIT")
     guard_id = InstrumentId.from_str(pair["global_guard_id"]) if pair["global_guard_id"] else None
 
-    config_strategy = LeadLagMMv3Config(
+    config_strategy = LeadLagMMv3PrimerConfig(
         follower_instrument_id=follower_id,
         leader_instrument_id=leader_id,
         global_guard_id=guard_id,
@@ -190,35 +193,27 @@ for pair in pairs:
         quote_refresh_interval_ms=pair["refresh_interval"],
         quote_refresh_jitter_ms=10,
         quote_refresh_offset_ms=pair["refresh_offset"],
-        min_quote_lifetime_ms=20,
+        min_quote_lifetime_ms=30,
         min_requote_ticks=1,
-        edge_min_ratio=Decimal("0.2"),
-        edge_max_ratio=Decimal("0.8"),
         book_type=BookType.L2_MBP,
         book_depth=50,
         post_only=True,
-        client_id=ClientId(BYBIT),
-        log_guard_events=True,
-        log_leader_updates=False,
-        min_balance_ratio=Decimal("0.95"),
-        ofi_enabled=True,
-        ofi_max_bps=Decimal("2.0"),
-        ofi_depth=10,
-        log_markout_events=True,
-        markout_widen_bps=Decimal("5.0"),
-        markout_max_spread_multiplier=Decimal("1.5"),
+        ofi_enabled=pair["ofi_enabled"],
+        ofi_max_bps=pair["ofi_max_bps"],
         liquidity_high_qty=pair["liquidity_high_qty"],
         liquidity_low_qty=pair["liquidity_low_qty"],
-        min_order_qty=pair["order_qty"] * Decimal("0.25"),
-        max_order_qty=pair["order_qty"] * Decimal("2.0"),
+        min_order_qty=pair["min_order_qty"],
+        max_order_qty=pair["order_qty"] * Decimal("3"),
+        maker_fee_bps=Decimal("7.5"),
+        min_profit_bps=Decimal("0.0"),
+        max_drawdown_pct=Decimal("0.05"),
     )
 
-    node.trader.add_strategy(LeadLagMMv3(config=config_strategy))
+    node.trader.add_strategy(LeadLagMMv3Primer(config=config_strategy))
 
-node.add_data_client_factory("BINANCE_SPOT", BinanceLiveDataClientFactory)
 node.add_data_client_factory(BYBIT, BybitLiveDataClientFactory)
 node.add_exec_client_factory(BYBIT, BybitLiveExecClientFactory)
-
+node.add_data_client_factory("BINANCE_SPOT", BinanceLiveDataClientFactory)
 node.build()
 
 if __name__ == "__main__":

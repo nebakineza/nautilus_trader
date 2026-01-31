@@ -125,7 +125,7 @@ def load_orderbook_data(
     print("LOADING ORDER BOOK DATA")
     print("=" * 70)
     
-    ob_file = Path(f"ob_data/BTCUSDT_Spot/{date_str}_BTCUSDT_ob200.data")
+    ob_file = Path(f"data/ob_data/BTCUSDT_Spot/{date_str}_BTCUSDT_ob200.data")
     
     if not ob_file.exists():
         print(f"✗ Order book file not found: {ob_file}")
@@ -239,9 +239,9 @@ def generate_reports(engine: BacktestEngine, output_dir: Path = None) -> None:
     print("=" * 70)
     
     if output_dir is None:
-        output_dir = Path("backtest_results_specialized_lowcap")
+        output_dir = Path("outputs/backtests/backtest_results_specialized_lowcap")
     
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     print(f"✓ Output directory: {output_dir}")
     
     # Account report
@@ -335,7 +335,7 @@ def main():
     run_backtest(engine)
     
     # Generate reports
-    output_dir = Path("backtest_results_specialized_lowcap")
+    output_dir = Path("outputs/backtests/backtest_results_specialized_lowcap")
     generate_reports(engine, output_dir)
     
     print("\n" + "=" * 70)

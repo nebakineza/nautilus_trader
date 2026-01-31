@@ -13,11 +13,11 @@ Optional markouts:
     - The mid CSV can contain either `mid` or `best_bid` + `best_ask` columns.
 
 Tip:
-    - If you're using Bybit JSONL order book data in `ob_data/`, you can generate
+    - If you're using Bybit JSONL order book data in `data/ob_data/`, you can generate
         a compatible mid CSV with `scripts/extract_mid_from_bybit_ob.py`.
 
 Example:
-  python3 scripts/analyze_v002_backtest.py --results-dir backtest_results_v002
+    python3 scripts/analyze_v002_backtest.py --results-dir outputs/backtests/backtest_results_v002
 """
 
 from __future__ import annotations

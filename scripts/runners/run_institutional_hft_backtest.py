@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Low-capital backtest runner for Bybit BTCUSDT-SPOT.
+"""Professional HFT backtest runner for Bybit BTCUSDT-SPOT.
 
-This runner executes the institutional-grade OBI market maker strategy
-with minimal capital ($500 USD) to test scalability and performance
-on undercapitalized accounts.
+This runner executes institutional-grade order book imbalance market making
+backtests with full latency modeling, realistic fill simulation, and comprehensive
+performance analysis.
 
 Usage:
-    python run_low_capital_backtest.py [--test] [--max-updates 10000]
+    python scripts/runners/run_institutional_hft_backtest.py [--test] [--date 2026-01-15] [--max-updates 10000]
 """
 
 import argparse
@@ -27,9 +27,10 @@ from nautilus_trader.model.enums import AccountType, BookType, OmsType
 from nautilus_trader.model.identifiers import TraderId, InstrumentId, Symbol
 from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.model.instruments import CurrencyPair
+from nautilus_trader.test_kit.providers import TestInstrumentProvider
 
 # Import custom components
-from strategy.hft_obi_bybit_spot_mm_v001 import InstitutionalOBIMarketMaker, InstitutionalMMConfig
+from examples.professional_hft_mm import InstitutionalOBIMarketMaker, InstitutionalMMConfig
 from examples.backtest.bybit_orderbook_loader import BybitOrderBookLoader
 from examples.backtest.institutional_models import create_institutional_backtest_models
 
@@ -62,21 +63,18 @@ def create_btcusdt_bybit_instrument() -> CurrencyPair:
 
 
 def setup_backtest_engine(
-    capital_usd: float = 500.0,
+    max_notional: float = 100_000.0,
     latency_model=None,
     fill_model=None,
 ) -> tuple[BacktestEngine, CurrencyPair]:
     """
-    Configure and create backtest engine for low-capital account.
+    Configure and create backtest engine.
     
     Parameters
     ----------
-    capital_usd : float
-        Account capital in USD (default: $500)
-    latency_model : LatencyModel, optional
-        Custom latency model
-    fill_model : FillModel, optional
-        Custom fill model
+    max_notional : float
+        Maximum notional exposure in USD
+
     
     Returns
     -------
@@ -84,13 +82,12 @@ def setup_backtest_engine(
         Configured engine and instrument
     """
     print("\n" + "=" * 70)
-    print("SETTING UP LOW-CAPITAL BACKTEST ENGINE")
+    print("SETTING UP BACKTEST ENGINE")
     print("=" * 70)
-    print(f"Account Capital: ${capital_usd:,.2f} USD")
     
     # Configure engine
     config = BacktestEngineConfig(
-        trader_id=TraderId("HFT-LOWCAP-001"),
+        trader_id=TraderId("HFT-INSTITUTIONAL-001"),
     )
     
     engine = BacktestEngine(config=config)
@@ -104,24 +101,20 @@ def setup_backtest_engine(
     print(f"  Maker Fee: {instrument.maker_fee}")
     print(f"  Taker Fee: {instrument.taker_fee}")
     
-    # Add venue with low-capital configuration
+    # Add venue with professional configuration
     print(f"\n✓ Adding venue: {BYBIT_VENUE}")
-    
-    # Calculate BTC allocation (10% of capital)
-    btc_allocation = capital_usd / 100_000 * 0.1  # Assume BTC at $97.5k
-    
     engine.add_venue(
         venue=BYBIT_VENUE,
         oms_type=OmsType.NETTING,
         account_type=AccountType.CASH,
         starting_balances=[
-            Money(capital_usd, USDT),  # Low-capital account
-            Money(btc_allocation, BTC),  # Small BTC allocation
+            Money(50_000, USDT),  # Professional MM capital
+            Money(0.5, BTC),      # Initial hedge inventory
         ],
-        base_currency=None,
-        book_type=BookType.L2_MBP,
-        latency_model=latency_model,
-        fill_model=fill_model,
+        base_currency=None,  # Multi-currency account
+        book_type=BookType.L2_MBP,  # Full order book depth
+        latency_model=latency_model,  # AWS Singapore co-location
+        fill_model=fill_model,        # Institutional fill simulation
     )
     
     if latency_model:
@@ -142,12 +135,30 @@ def load_orderbook_data(
     date_str: str = "2026-01-15",
     max_updates: int = None,
 ) -> int:
-    """Load order book data from Bybit JSON files."""
+    """
+    Load order book data from Bybit JSON files.
+    
+    Parameters
+    ----------
+    engine : BacktestEngine
+        Backtest engine
+    instrument : CurrencyPair
+        Target instrument
+    date_str : str
+        Date in format YYYY-MM-DD
+    max_updates : int, optional
+        Maximum number of updates to load
+    
+    Returns
+    -------
+    int
+        Number of updates loaded
+    """
     print("\n" + "=" * 70)
     print("LOADING ORDER BOOK DATA")
     print("=" * 70)
     
-    ob_file = Path(f"ob_data/BTCUSDT_Spot/{date_str}_BTCUSDT_ob200.data")
+    ob_file = Path(f"data/ob_data/BTCUSDT_Spot/{date_str}_BTCUSDT_ob200.data")
     
     if not ob_file.exists():
         print(f"✗ Order book file not found: {ob_file}")
@@ -192,10 +203,10 @@ def load_orderbook_data(
 def setup_strategy(
     engine: BacktestEngine,
     instrument: CurrencyPair,
-    capital_usd: float = 500.0,
+    config_overrides: dict = None,
 ) -> InstitutionalOBIMarketMaker:
     """
-    Create and add strategy to engine with low-capital configuration.
+    Create and add strategy to engine.
     
     Parameters
     ----------
@@ -203,8 +214,8 @@ def setup_strategy(
         Backtest engine
     instrument : CurrencyPair
         Target instrument
-    capital_usd : float
-        Account capital for position sizing
+    config_overrides : dict, optional
+        Configuration overrides
     
     Returns
     -------
@@ -212,54 +223,52 @@ def setup_strategy(
         Configured strategy
     """
     print("\n" + "=" * 70)
-    print("SETTING UP LOW-CAPITAL STRATEGY")
+    print("SETTING UP STRATEGY")
     print("=" * 70)
     
-    # Scale down position sizes based on capital
-    # For $500 capital: ~$50 per quote (10% of account per side)
-    capital_multiplier = capital_usd / 50_000.0  # Relative to $50k professional account
-    
-    base_qty = Decimal("0.01") * Decimal(str(capital_multiplier))
-    max_position = Decimal("0.5") * Decimal(str(capital_multiplier))
-    
-    # Create config for low-capital account
+    # Create config with overrides
     config_dict = {
         "instrument_id": str(instrument.id),
-        "base_qty": base_qty,
-        "max_position_qty": max_position,
+        "base_qty": Decimal("0.01"),
+        "max_position_qty": Decimal("0.5"),
         "obi_levels": 10,
         "obi_ema_period": 20,
         "obi_entry_threshold": 0.20,
         "min_spread_bps": 2,
         "max_spread_bps": 10,
-        "max_notional_usd": capital_usd,  # Total account capital
-        "emergency_liquidation_loss_usd": -capital_usd * 0.2,  # Stop at 20% loss
     }
+    
+    if config_overrides:
+        config_dict.update(config_overrides)
     
     config = InstitutionalMMConfig(**config_dict)
     
-    print(f"✓ Strategy Config: InstitutionalOBIMarketMaker (Low-Capital)")
-    print(f"  Account Capital: ${capital_usd:,.2f}")
-    print(f"  Capital Multiplier: {capital_multiplier:.2%}")
+    print(f"✓ Strategy Config: InstitutionalOBIMarketMaker")
     print(f"  Instrument: {config.instrument_id}")
-    print(f"  Base Qty: {config.base_qty} BTC (~${float(config.base_qty) * 97_500:.2f})")
+    print(f"  Base Qty: {config.base_qty} BTC")
     print(f"  Max Position: {config.max_position_qty} BTC")
     print(f"  OBI Levels: {config.obi_levels}")
-    print(f"  OBI EMA Period: {config.obi_ema_period}")
-    print(f"  OBI Entry Threshold: {config.obi_entry_threshold:.0%}")
-    print(f"  Min Spread: {config.min_spread_bps} bps")
-    print(f"  Max Spread: {config.max_spread_bps} bps")
-    print(f"  Emergency Loss Stop: {config.emergency_liquidation_loss_usd:.2f} USD")
+    print(f"  OBI Entry Threshold: {config.obi_entry_threshold:.2%}")
+    print(f"  Min/Max Spread: {config.min_spread_bps}/{config.max_spread_bps} bps")
     
+    # Create and add strategy
     strategy = InstitutionalOBIMarketMaker(config)
     engine.add_strategy(strategy)
-    print(f"✓ Strategy added to engine: {strategy.id}")
+    
+    print(f"✓ Strategy added to engine: {strategy.__class__.__name__}")
     
     return strategy
 
 
 def run_backtest(engine: BacktestEngine) -> None:
-    """Run the backtest."""
+    """
+    Execute backtest.
+    
+    Parameters
+    ----------
+    engine : BacktestEngine
+        Configured backtest engine
+    """
     print("\n" + "=" * 70)
     print("RUNNING BACKTEST")
     print("=" * 70)
@@ -281,15 +290,24 @@ def run_backtest(engine: BacktestEngine) -> None:
 
 
 def generate_reports(engine: BacktestEngine, output_dir: Path = None) -> None:
-    """Generate performance reports."""
+    """
+    Generate performance reports.
+    
+    Parameters
+    ----------
+    engine : BacktestEngine
+        Completed backtest engine
+    output_dir : Path, optional
+        Directory for report files
+    """
     print("\n" + "=" * 70)
     print("GENERATING REPORTS")
     print("=" * 70)
     
     if output_dir is None:
-        output_dir = Path("backtest_results_lowcap")
+        output_dir = Path("outputs/backtests/backtest_results")
     
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     print(f"✓ Output directory: {output_dir}")
     
     # Generate account report
@@ -352,82 +370,91 @@ def generate_reports(engine: BacktestEngine, output_dir: Path = None) -> None:
 
 
 def main():
-    """Main execution."""
+    """Main backtest runner."""
     parser = argparse.ArgumentParser(
-        description="Low-capital backtest for OBI market maker strategy"
+        description="Institutional HFT backtest runner",
     )
     parser.add_argument(
         "--test",
         action="store_true",
-        help="Run in test mode (quick execution)",
+        help="Run in test mode (limited data)",
     )
     parser.add_argument(
-        "--capital",
-        type=float,
-        default=500.0,
-        help="Account capital in USD (default: 500)",
+        "--date",
+        default="2026-01-15",
+        help="Date in format YYYY-MM-DD (default: 2026-01-15)",
     )
     parser.add_argument(
         "--max-updates",
         type=int,
         default=None,
-        help="Maximum order book updates to process",
-    )
-    parser.add_argument(
-        "--date",
-        type=str,
-        default="2026-01-15",
-        help="Backtest date in format YYYY-MM-DD",
+        help="Maximum number of order book updates to process",
     )
     
     args = parser.parse_args()
     
-    print("\n" + "╔" + "=" * 68 + "╗")
-    print("║" + " LOW-CAPITAL HFT MARKET MAKER BACKTEST ".center(68) + "║")
-    print("║" + f" Capital: ${args.capital:,.2f} ".center(68) + "║")
-    print("╚" + "=" * 68 + "╝")
-    
-    # Setup backtest models
-    latency_model, fill_model = create_institutional_backtest_models()
-    
-    # Setup engine
-    engine, instrument = setup_backtest_engine(
-        capital_usd=args.capital,
-        latency_model=latency_model,
-        fill_model=fill_model,
-    )
-    
-    # Load data
-    max_updates = 10000 if args.test else args.max_updates
-    updates_loaded = load_orderbook_data(
-        engine,
-        instrument,
-        args.date,
-        max_updates,
-    )
-    
-    # Setup strategy
-    strategy = setup_strategy(
-        engine,
-        instrument,
-        capital_usd=args.capital,
-    )
-    
-    # Run backtest
-    run_backtest(engine)
-    
-    # Generate reports
-    output_dir = Path(f"backtest_results_lowcap_{args.capital:.0f}")
-    generate_reports(engine, output_dir)
+    # Override for test mode
+    if args.test:
+        args.max_updates = args.max_updates or 10000
+        print("⚠ Running in TEST mode - limited data")
     
     print("\n" + "=" * 70)
-    print("BACKTEST COMPLETE")
+    print("INSTITUTIONAL HFT BACKTEST RUNNER")
     print("=" * 70)
-    print(f"✓ Backtest executed successfully")
-    print(f"  Order Book Updates: {updates_loaded:,}")
-    print(f"  Results saved to: {output_dir}/")
-    print("=" * 70 + "\n")
+    print(f"Date: {args.date}")
+    print(f"Max Updates: {args.max_updates if args.max_updates else 'All'}")
+    print(f"Mode: {'TEST' if args.test else 'FULL'}")
+    
+    try:
+        # Create models
+        latency_model, fill_model = create_institutional_backtest_models(random_seed=42)
+        print(f"\n✓ Models created:")
+        print(f"  Latency: CoLocation (250μs + jitter)")
+        print(f"  Fill: Institutional (85% queue, 30% liquidity)")
+        
+        # Setup engine
+        engine, instrument = setup_backtest_engine(
+            latency_model=latency_model,
+            fill_model=fill_model,
+        )
+        
+        # Load data
+        delta_count = load_orderbook_data(
+            engine,
+            instrument,
+            date_str=args.date,
+            max_updates=args.max_updates,
+        )
+        
+        if delta_count == 0:
+            print("\n✗ No data loaded, cannot proceed")
+            return 1
+        
+        # Setup strategy
+        strategy = setup_strategy(engine, instrument)
+        
+        # Run backtest
+        run_backtest(engine)
+        
+        # Generate reports
+        generate_reports(engine)
+        
+        # Summary
+        print("\n" + "=" * 70)
+        print("BACKTEST COMPLETE")
+        print("=" * 70)
+        print(f"✓ Backtest executed successfully")
+        print(f"  Order Book Updates: {delta_count:,}")
+        print("  Results saved to: outputs/backtests/backtest_results/")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"\n✗ Backtest failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

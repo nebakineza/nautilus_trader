@@ -81,6 +81,7 @@ ib = [
 docker = ["docker>=7.1.0,<8.0.0"]
 polymarket = ["py-clob-client>=0.34.5,<1.0.0"]
 visualization = ["plotly>=6.3.1,<7.0.0"]
+optimization = ["optuna>=3.6.0,<5.0.0"]
 
 [dependency-groups]
 dev = [
