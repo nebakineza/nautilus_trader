@@ -19,6 +19,7 @@ from nautilus_trader.model.orders import Order, OrderList
 from nautilus_trader.trading.strategy import Strategy
 
 from strategy.inventory.risk_manager import InventoryRiskManager
+from strategy.metrics.questdb_writer import QuestDbILPWriter
 
 
 class LeadLagMMv3Config(StrategyConfig, frozen=True, kw_only=True):
@@ -94,6 +95,16 @@ class LeadLagMMv3Config(StrategyConfig, frozen=True, kw_only=True):
     # Balance protection
     min_balance_ratio: Decimal = Decimal("0.95")
 
+    # Fees & profit floor (bps)
+    maker_fee_bps: Decimal = Decimal("7.5")
+    min_profit_bps: Decimal = Decimal("5.0")
+
+    # Metrics
+    metrics_snapshot_interval_secs: int = 5
+
+    # Equity protection
+    max_drawdown_pct: Decimal = Decimal("0.05")
+
     # Logging
     log_guard_events: bool = True
     log_leader_updates: bool = False
@@ -129,6 +140,7 @@ class LeadLagMMv3(Strategy):
         self._last_leader_ts_ns: int = 0
         self._last_guard_ts_ns: int = 0
         self._last_follower_ts_ns: int = 0
+        self._last_sync_ts_ns: int = 0
 
         self._last_guard_mid: Decimal | None = None
         self._current_diff_bps: float = 0.0
@@ -140,6 +152,10 @@ class LeadLagMMv3(Strategy):
         self._net_position: Decimal = Decimal("0")
         self._markout_pending: list[tuple[int, OrderSide, Decimal]] = []
         self._markout_ema_bps: Decimal = Decimal("0")
+        self._starting_equity: Decimal | None = None
+        self._killswitch_triggered: bool = False
+        self._metrics = QuestDbILPWriter.from_env("LLMMv3")
+        self._last_metrics_ts_ns: int = 0
         self._inventory_manager = InventoryRiskManager(
             max_position=self.config.max_position_qty,
             risk_aversion=self.config.risk_aversion,
@@ -374,7 +390,18 @@ class LeadLagMMv3(Strategy):
                 self.cancel_order(order, client_id=self.client_id)
 
     def _refresh_quotes(self, now_ns: int) -> int:
+        if now_ns - self._last_sync_ts_ns > 5 * 1_000_000_000:
+            self._sync_position_with_exchange()
+            self._last_sync_ts_ns = now_ns
+
+        if now_ns - self._last_metrics_ts_ns > self.config.metrics_snapshot_interval_secs * 1_000_000_000:
+            self._emit_account_snapshot(now_ns)
+            self._last_metrics_ts_ns = now_ns
+
         if self.follower_instrument is None or self.follower_mid is None:
+            return 0
+
+        if self._check_killswitch():
             return 0
 
         pending_statuses = (OrderStatus.PENDING_CANCEL, OrderStatus.PENDING_UPDATE)
@@ -415,7 +442,14 @@ class LeadLagMMv3(Strategy):
         if self.config.ofi_enabled and self.follower_book is not None:
             ofi = self._calculate_ofi(self.follower_book)
             if ofi is not None:
-                fair_price += self.follower_mid * (self.config.ofi_max_bps * ofi / Decimal("10000"))
+                ofi_shift_bps = self.config.ofi_max_bps * ofi
+                fair_price += self.follower_mid * (ofi_shift_bps / Decimal("10000"))
+                if abs(ofi_shift_bps) > Decimal("1.0"):
+                    self.log.info(
+                        f"OFI ACTIVE: {self.config.follower_instrument_id.symbol} | "
+                        f"OFI={ofi:.4f} | Shift={ofi_shift_bps:.2f} bps",
+                        LogColor.CYAN,
+                    )
         raw_bid = (fair_price - spread_half) + inventory_skew
         raw_ask = (fair_price + spread_half) + inventory_skew
 
@@ -470,6 +504,9 @@ class LeadLagMMv3(Strategy):
         desired_qty: Quantity,
         defer_submit: bool = False,
     ) -> Order | None:
+        if desired_qty.as_decimal() < self.config.min_order_qty:
+            return None
+
         order = self._bid_order if side == OrderSide.BUY else self._ask_order
         order_ts_ns = self._bid_order_ts_ns if side == OrderSide.BUY else self._ask_order_ts_ns
 
@@ -596,7 +633,9 @@ class LeadLagMMv3(Strategy):
             widen = min(widen, self.config.markout_max_spread_multiplier - Decimal("1"))
             if widen > Decimal("0"):
                 multiplier += widen
-        return self.config.spread_bps * multiplier
+        dynamic_spread = self.config.spread_bps * multiplier
+        fee_floor = (self.config.maker_fee_bps * Decimal("2")) + self.config.min_profit_bps
+        return max(dynamic_spread, fee_floor)
 
     def _update_markout(self, now_ns: int) -> None:
         if self.follower_mid is None or not self._markout_pending:
@@ -636,7 +675,7 @@ class LeadLagMMv3(Strategy):
         if self.follower_mid is None or self._order_qty is None:
             return Decimal("0"), None, None
 
-        optimal_target = Decimal("0")
+        optimal_target = self.config.max_position_qty / Decimal("2")
         skew_bps = Decimal(
             str(
                 self._inventory_manager.calculate_skew(
@@ -688,7 +727,7 @@ class LeadLagMMv3(Strategy):
 
         final_size = base_qty * vol_scalar * depth_scalar
         final_size = min(final_size, self.config.max_order_qty)
-        min_floor = self.config.order_qty * Decimal("0.5")
+        min_floor = self.config.order_qty * Decimal("0.2")
         final_size = max(final_size, min_floor, self.config.min_order_qty)
         return final_size
 
@@ -711,10 +750,53 @@ class LeadLagMMv3(Strategy):
             max_sell = base_balance * self.config.min_balance_ratio
             qty = min(base_qty, max_sell)
 
+        if qty < self.config.min_order_qty:
+            return None
+
         if qty <= Decimal("0"):
             return None
 
         return self.follower_instrument.make_qty(qty)
+
+    def _calculate_total_equity(self) -> Decimal:
+        if self.follower_instrument is None:
+            return Decimal("0")
+
+        quote_balance = self._get_available_balance(self.follower_instrument.quote_currency)
+        base_balance = self._get_available_balance(self.follower_instrument.base_currency)
+        mid = self.follower_mid if self.follower_mid is not None else Decimal("0")
+        return quote_balance + (base_balance * mid)
+
+    def _check_killswitch(self) -> bool:
+        if self._killswitch_triggered:
+            return True
+
+        if self._starting_equity is None:
+            equity = self._calculate_total_equity()
+            if equity > Decimal("0"):
+                self._starting_equity = equity
+                self.log.info(
+                    f"KILLSWITCH ARMED: Starting Equity = {self._starting_equity} USDT",
+                    LogColor.YELLOW,
+                )
+            return False
+
+        current_equity = self._calculate_total_equity()
+        if current_equity <= Decimal("0"):
+            return False
+
+        drawdown = (self._starting_equity - current_equity) / self._starting_equity
+        if drawdown > self.config.max_drawdown_pct:
+            self.log.error(
+                f"KILLSWITCH TRIGGERED: Drawdown {drawdown:.2%} > Limit {self.config.max_drawdown_pct:.2%}",
+                LogColor.RED,
+            )
+            self.cancel_all_orders(self.config.follower_instrument_id, client_id=self.client_id)
+            self._killswitch_triggered = True
+            self.stop()
+            return True
+
+        return False
 
     def _get_available_balance(self, currency: Currency) -> Decimal:
         account = self.cache.account_for_venue(self.config.follower_instrument_id.venue)
@@ -730,6 +812,71 @@ class LeadLagMMv3(Strategy):
         if balance is None:
             return Decimal("0")
         return balance.as_decimal() if hasattr(balance, "as_decimal") else Decimal(balance)
+
+    def _sync_position_with_exchange(self) -> None:
+        """
+        Force-syncs the algorithm's inventory tracking with the actual wallet balance.
+        Self-heals missed fills, disconnects, or manual website trades.
+        """
+        if self.follower_instrument is None:
+            return
+
+        account = self.cache.account_for_venue(self.config.follower_instrument_id.venue)
+        if account is None:
+            return
+
+        base_currency = self.follower_instrument.base_currency
+        wallet_balance = account.balance_total(base_currency)
+        if wallet_balance is None:
+            return
+
+        real_qty = wallet_balance.as_decimal() if hasattr(wallet_balance, "as_decimal") else Decimal(wallet_balance)
+        drift = real_qty - self._net_position
+        if abs(drift) > self.config.min_order_qty:
+            self.log.warning(
+                f"DRIFT DETECTED: Algo={self._net_position:.4f} vs Wallet={real_qty:.4f} -> Syncing.",
+                LogColor.YELLOW,
+            )
+            self._net_position = real_qty
+
+    def _emit_account_snapshot(self, now_ns: int) -> None:
+        if self.follower_instrument is None:
+            return
+
+        account = self.cache.account_for_venue(self.config.follower_instrument_id.venue)
+        if account is None:
+            return
+
+        base_currency = self.follower_instrument.base_currency
+        quote_currency = self.follower_instrument.quote_currency
+
+        base_balance = account.balance_total(base_currency)
+        quote_balance = account.balance_total(quote_currency)
+        if base_balance is None or quote_balance is None:
+            return
+
+        base_qty = base_balance.as_decimal() if hasattr(base_balance, "as_decimal") else Decimal(base_balance)
+        quote_qty = quote_balance.as_decimal() if hasattr(quote_balance, "as_decimal") else Decimal(quote_balance)
+        mid = self.follower_mid if self.follower_mid is not None else Decimal("0")
+        equity = quote_qty + (base_qty * mid)
+
+        self._metrics.send(
+            table="live_account_snapshot",
+            tags={
+                "strategy": "LLMMv3",
+                "venue": self.config.follower_instrument_id.venue.value,
+                "symbol": self.config.follower_instrument_id.symbol.value,
+            },
+            fields={
+                "base_qty": base_qty,
+                "quote_qty": quote_qty,
+                "mid": mid,
+                "equity": equity,
+                "equity_usd": equity,
+                "net_position": self._net_position,
+            },
+            ts_ns=now_ns,
+        )
 
     def on_event(self, event) -> None:
         if hasattr(event, "last_qty") and hasattr(event, "order_side"):
@@ -748,6 +895,26 @@ class LeadLagMMv3(Strategy):
                 ts_event = getattr(event, "ts_event", None)
                 ts_ns = self._event_ts_ns_from_event(ts_event)
                 self._markout_pending.append((ts_ns, event.order_side, price))
+
+                commission = getattr(event, "commission", None)
+                commission_val = commission.as_decimal() if hasattr(commission, "as_decimal") else commission
+                liquidity_side = getattr(event, "liquidity_side", None)
+                self._metrics.send(
+                    table="live_fills",
+                    tags={
+                        "strategy": "LLMMv3",
+                        "venue": self.config.follower_instrument_id.venue.value,
+                        "symbol": self.config.follower_instrument_id.symbol.value,
+                        "side": event.order_side.name,
+                        "liquidity": getattr(liquidity_side, "name", None),
+                    },
+                    fields={
+                        "qty": event.last_qty.as_decimal(),
+                        "price": price,
+                        "commission": commission_val,
+                    },
+                    ts_ns=ts_ns,
+                )
 
     def _event_ts_ns_from_event(self, ts_event) -> int:
         if ts_event is None:

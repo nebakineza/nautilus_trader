@@ -80,7 +80,7 @@ class LeadLagMMConfig(StrategyConfig, frozen=True):
 
     # Recording (JSON lines compatible with BybitOrderBookLoader)
     record_orderbook: bool = False
-    record_path: str = "ob_data_live"
+    record_path: str = "data/ob_data_live"
     record_depth: int = 50
     record_snapshot_interval_secs: int = 10
 
