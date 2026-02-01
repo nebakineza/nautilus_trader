@@ -479,6 +479,9 @@ def build_engine(
     leader_instruments: dict[str, CurrencyPair] = {}
     follower_instruments: dict[str, CurrencyPair] = {}
 
+    fill_model = _build_fill_model(fill_model_name, liquidity_factor)
+    latency_model = _build_latency_model(latency_ms)
+
     for pair in pairs:
         meta_bybit = _load_instrument_meta(questdb, "BYBIT", pair.symbol) if questdb else None
         meta_binance = _load_instrument_meta(questdb, "BINANCE", pair.symbol) if questdb else None
@@ -490,15 +493,9 @@ def build_engine(
         follower_instruments[pair.symbol] = follower
         base_currencies.append(follower.base_currency)
 
-        engine.add_instrument(leader)
-        engine.add_instrument(follower)
-
     starting_balances = [Money(float(starting_usdt), USDT)]
     for cur in base_currencies:
         starting_balances.append(Money(0.0, cur))
-
-    fill_model = _build_fill_model(fill_model_name, liquidity_factor)
-    latency_model = _build_latency_model(latency_ms)
 
     engine.add_venue(
         venue=Venue("BINANCE_SPOT"),
@@ -522,6 +519,12 @@ def build_engine(
         latency_model=latency_model,
         liquidity_consumption=liquidity_consumption,
     )
+
+    for pair in pairs:
+        leader = leader_instruments[pair.symbol]
+        follower = follower_instruments[pair.symbol]
+        engine.add_instrument(leader)
+        engine.add_instrument(follower)
 
     for pair in pairs:
         leader = leader_instruments[pair.symbol]
