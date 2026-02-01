@@ -92,8 +92,13 @@ class LeadLagMMv3Config(StrategyConfig, frozen=True, kw_only=True):
     markout_max_spread_multiplier: Decimal = Decimal("2.0")
     log_markout_events: bool = False
 
+    # Inventory skew caps
+    internal_price_delta_limit: Decimal = Decimal("50.0")
+
     # Balance protection
     min_balance_ratio: Decimal = Decimal("0.95")
+    min_quote_reserve_ratio: Decimal = Decimal("0.2")
+    min_quote_reserve_usdt: Decimal = Decimal("0")
 
     # Fees & profit floor (bps)
     maker_fee_bps: Decimal = Decimal("7.5")
@@ -154,6 +159,10 @@ class LeadLagMMv3(Strategy):
         self._markout_ema_bps: Decimal = Decimal("0")
         self._starting_equity: Decimal | None = None
         self._killswitch_triggered: bool = False
+        self._wap_inventory: Decimal = Decimal("0")
+        self._wap_price: Decimal = Decimal("0")
+        self._realized_pnl: Decimal = Decimal("0")
+        self._fees_paid: Decimal = Decimal("0")
         self._metrics = QuestDbILPWriter.from_env("LLMMv3")
         self._last_metrics_ts_ns: int = 0
         self._inventory_manager = InventoryRiskManager(
@@ -162,6 +171,8 @@ class LeadLagMMv3(Strategy):
             volatility=self.config.volatility,
             time_horizon=self.config.inventory_time_horizon_secs,
         )
+
+        self._local_quote_budget: Decimal | None = None
 
         self.client_id = config.client_id
 
@@ -220,6 +231,10 @@ class LeadLagMMv3(Strategy):
                 book_type=self.config.book_type,
                 depth=self.config.book_depth,
             )
+
+        self._sync_position_with_exchange()
+        self._sync_quote_budget()
+        self._last_sync_ts_ns = self._now_ns()
 
     def on_stop(self) -> None:
         gc.enable()
@@ -392,6 +407,7 @@ class LeadLagMMv3(Strategy):
     def _refresh_quotes(self, now_ns: int) -> int:
         if now_ns - self._last_sync_ts_ns > 5 * 1_000_000_000:
             self._sync_position_with_exchange()
+            self._sync_quote_budget()
             self._last_sync_ts_ns = now_ns
 
         if now_ns - self._last_metrics_ts_ns > self.config.metrics_snapshot_interval_secs * 1_000_000_000:
@@ -685,6 +701,9 @@ class LeadLagMMv3(Strategy):
                 ),
             ),
         )
+        limit = self.config.internal_price_delta_limit
+        if limit > Decimal("0"):
+            skew_bps = max(-limit, min(limit, skew_bps))
         skew_px = self.follower_mid * (skew_bps / Decimal("10000"))
 
         bid_size, ask_size = self._inventory_manager.calculate_sizes(
@@ -743,7 +762,15 @@ class LeadLagMMv3(Strategy):
 
         if side == OrderSide.BUY:
             quote_balance = self._get_available_balance(quote_currency)
-            max_buy = (quote_balance * self.config.min_balance_ratio) / self.follower_mid
+            if self._local_quote_budget is None:
+                budget = quote_balance
+            else:
+                budget = max(self._local_quote_budget, quote_balance)
+            reserve_ratio = budget * self.config.min_quote_reserve_ratio
+            reserve_abs = self.config.min_quote_reserve_usdt
+            reserve = max(reserve_ratio, reserve_abs)
+            available = max(budget - reserve, Decimal("0"))
+            max_buy = (available * self.config.min_balance_ratio) / self.follower_mid
             qty = min(base_qty, max_buy)
         else:
             base_balance = self._get_available_balance(base_currency)
@@ -812,6 +839,23 @@ class LeadLagMMv3(Strategy):
         if balance is None:
             return Decimal("0")
         return balance.as_decimal() if hasattr(balance, "as_decimal") else Decimal(balance)
+
+    def _sync_quote_budget(self) -> None:
+        if self.follower_instrument is None:
+            return
+
+        account = self.cache.account_for_venue(self.config.follower_instrument_id.venue)
+        if account is None:
+            return
+
+        quote_currency = self.follower_instrument.quote_currency
+        quote_balance = account.balance_total(quote_currency)
+        if quote_balance is None:
+            return
+
+        self._local_quote_budget = (
+            quote_balance.as_decimal() if hasattr(quote_balance, "as_decimal") else Decimal(quote_balance)
+        )
 
     def _sync_position_with_exchange(self) -> None:
         """
@@ -892,12 +936,26 @@ class LeadLagMMv3(Strategy):
                 price = event.price.as_decimal()
 
             if price is not None:
+                if self._local_quote_budget is not None:
+                    notional = event.last_qty.as_decimal() * price
+                    if event.order_side == OrderSide.BUY:
+                        self._local_quote_budget = max(self._local_quote_budget - notional, Decimal("0"))
+                    elif event.order_side == OrderSide.SELL:
+                        self._local_quote_budget += notional
+
+                commission = getattr(event, "commission", None)
+                commission_val = commission.as_decimal() if hasattr(commission, "as_decimal") else commission
+                self._update_wap_ledger(
+                    event.order_side,
+                    price,
+                    event.last_qty.as_decimal(),
+                    Decimal(str(commission_val)) if commission_val is not None else Decimal("0"),
+                )
+
                 ts_event = getattr(event, "ts_event", None)
                 ts_ns = self._event_ts_ns_from_event(ts_event)
                 self._markout_pending.append((ts_ns, event.order_side, price))
 
-                commission = getattr(event, "commission", None)
-                commission_val = commission.as_decimal() if hasattr(commission, "as_decimal") else commission
                 liquidity_side = getattr(event, "liquidity_side", None)
                 self._metrics.send(
                     table="live_fills",
@@ -915,6 +973,55 @@ class LeadLagMMv3(Strategy):
                     },
                     ts_ns=ts_ns,
                 )
+
+    def _update_wap_ledger(
+        self,
+        side: OrderSide,
+        price: Decimal,
+        qty: Decimal,
+        fee: Decimal,
+    ) -> None:
+        self._fees_paid += fee
+        self._realized_pnl -= fee
+
+        if side == OrderSide.BUY:
+            if self._wap_inventory >= 0:
+                total_cost = (self._wap_inventory * self._wap_price) + (qty * price)
+                self._wap_inventory += qty
+                if self._wap_inventory != 0:
+                    self._wap_price = total_cost / self._wap_inventory
+            else:
+                remaining_short = abs(self._wap_inventory)
+                if qty <= remaining_short:
+                    pnl = (self._wap_price - price) * qty
+                    self._realized_pnl += pnl
+                    self._wap_inventory += qty
+                else:
+                    pnl = (self._wap_price - price) * remaining_short
+                    self._realized_pnl += pnl
+                    excess_qty = qty - remaining_short
+                    self._wap_inventory = excess_qty
+                    self._wap_price = price
+        elif side == OrderSide.SELL:
+            if self._wap_inventory <= 0:
+                total_cost = (abs(self._wap_inventory) * self._wap_price) + (qty * price)
+                self._wap_inventory -= qty
+                if self._wap_inventory != 0:
+                    self._wap_price = total_cost / abs(self._wap_inventory)
+            else:
+                if qty <= self._wap_inventory:
+                    pnl = (price - self._wap_price) * qty
+                    self._realized_pnl += pnl
+                    self._wap_inventory -= qty
+                else:
+                    pnl = (price - self._wap_price) * self._wap_inventory
+                    self._realized_pnl += pnl
+                    excess_qty = qty - self._wap_inventory
+                    self._wap_inventory = -excess_qty
+                    self._wap_price = price
+
+    def _get_realized_pnl(self) -> Decimal:
+        return self._realized_pnl
 
     def _event_ts_ns_from_event(self, ts_event) -> int:
         if ts_event is None:
