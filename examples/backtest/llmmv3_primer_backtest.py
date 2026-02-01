@@ -16,7 +16,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Iterable
 
-from nautilus_trader.adapters.binance import BINANCE_VENUE
 from nautilus_trader.adapters.bybit.constants import BYBIT_VENUE
 from nautilus_trader.backtest.config import BacktestEngineConfig
 from nautilus_trader.backtest.engine import BacktestEngine
@@ -25,6 +24,7 @@ from nautilus_trader.model.currencies import USDT
 from nautilus_trader.model.objects import Currency
 from nautilus_trader.model.enums import AccountType, BookType, OmsType
 from nautilus_trader.model.identifiers import InstrumentId, Symbol, TraderId
+from nautilus_trader.model.venues import Venue
 from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.model.instruments import CurrencyPair
 
@@ -501,7 +501,7 @@ def build_engine(
     latency_model = _build_latency_model(latency_ms)
 
     engine.add_venue(
-        venue=BINANCE_VENUE,
+        venue=Venue("BINANCE_SPOT"),
         oms_type=OmsType.NETTING,
         account_type=AccountType.CASH,
         base_currency=None,
