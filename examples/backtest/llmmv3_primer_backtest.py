@@ -21,7 +21,8 @@ from nautilus_trader.adapters.bybit.constants import BYBIT_VENUE
 from nautilus_trader.backtest.config import BacktestEngineConfig
 from nautilus_trader.backtest.engine import BacktestEngine
 from nautilus_trader.config import LoggingConfig
-from nautilus_trader.model.currencies import USDT, Currency
+from nautilus_trader.model.currencies import USDT
+from nautilus_trader.model.objects import Currency
 from nautilus_trader.model.enums import AccountType, BookType, OmsType
 from nautilus_trader.model.identifiers import InstrumentId, Symbol, TraderId
 from nautilus_trader.model.objects import Money, Price, Quantity
@@ -265,7 +266,7 @@ def _load_instrument_meta(
 
 
 def _create_currency(symbol: str) -> Currency:
-    return Currency(symbol, 8)
+    return Currency.from_internal_map(symbol)
 
 
 def _create_instrument(
