@@ -6,11 +6,14 @@ Supports SOL/DOGE/AVAX with Binance leader + Bybit follower data.
 from __future__ import annotations
 
 import argparse
+import json
 import math
+import os
 import time
+import hmac
+import hashlib
 import urllib.parse
 import urllib.request
-import json
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -242,6 +245,42 @@ def _query_questdb_json(cfg: QuestDbConfig, sql: str) -> dict:
         return json.load(resp)
 
 
+def _fetch_bybit_balances(assets: list[str]) -> dict[str, Decimal]:
+    api_key = os.getenv("BYBIT_API_KEY")
+    api_secret = os.getenv("BYBIT_API_SECRET")
+    if not api_key or not api_secret:
+        raise RuntimeError("BYBIT_API_KEY/BYBIT_API_SECRET not set")
+
+    endpoint = "/v5/account/wallet-balance"
+    params = {"accountType": "UNIFIED"}
+    query = urllib.parse.urlencode(params)
+    ts = str(int(time.time() * 1000))
+    recv_window = "5000"
+    payload = ts + api_key + recv_window + query
+    sig = hmac.new(api_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    url = "https://api.bybit.com" + endpoint + "?" + query
+
+    req = urllib.request.Request(url)
+    req.add_header("X-BAPI-API-KEY", api_key)
+    req.add_header("X-BAPI-SIGN", sig)
+    req.add_header("X-BAPI-SIGN-TYPE", "2")
+    req.add_header("X-BAPI-TIMESTAMP", ts)
+    req.add_header("X-BAPI-RECV-WINDOW", recv_window)
+
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        payload = json.loads(resp.read().decode())
+
+    balances: dict[str, Decimal] = {}
+    coins = payload.get("result", {}).get("list", [{}])[0].get("coin", [])
+    asset_set = {a.upper() for a in assets}
+    for coin in coins:
+        symbol = coin.get("coin", "").upper()
+        if symbol in asset_set:
+            balances[symbol] = Decimal(str(coin.get("walletBalance", "0")))
+
+    return balances
+
+
 def _load_instrument_meta(
     cfg: QuestDbConfig, venue: str, symbol: str
 ) -> dict[str, Decimal] | None:
@@ -462,6 +501,7 @@ def build_engine(
     liquidity_consumption: bool,
     maker_fee: Decimal,
     taker_fee: Decimal,
+    starting_balances: dict[str, Decimal] | None,
 ) -> tuple[BacktestEngine, dict[str, CurrencyPair], dict[str, CurrencyPair]]:
     config = BacktestEngineConfig(
         trader_id=TraderId("BACKTEST-LLMMV3-PRIMER"),
@@ -493,16 +533,17 @@ def build_engine(
         follower_instruments[pair.symbol] = follower
         base_currencies.append(follower.base_currency)
 
-    starting_balances = [Money(float(starting_usdt), USDT)]
+    balances = starting_balances or {}
+    starting_balances_list = [Money(float(balances.get("USDT", starting_usdt)), USDT)]
     for cur in base_currencies:
-        starting_balances.append(Money(0.0, cur))
+        starting_balances_list.append(Money(float(balances.get(cur.code, Decimal("0"))), cur))
 
     engine.add_venue(
         venue=Venue("BINANCE_SPOT"),
         oms_type=OmsType.NETTING,
         account_type=AccountType.CASH,
         base_currency=None,
-        starting_balances=starting_balances,
+        starting_balances=starting_balances_list,
         book_type=BookType.L2_MBP,
         fill_model=fill_model,
         latency_model=latency_model,
@@ -513,7 +554,7 @@ def build_engine(
         oms_type=OmsType.NETTING,
         account_type=AccountType.CASH,
         base_currency=None,
-        starting_balances=starting_balances,
+        starting_balances=starting_balances_list,
         book_type=BookType.L2_MBP,
         fill_model=fill_model,
         latency_model=latency_model,
@@ -608,6 +649,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mnt-discount", action="store_true")
     parser.add_argument("--mm-tier", default="none", choices=("none", "mm1", "mm2", "mm3"))
     parser.add_argument("--out-dir", default="backtest_results/llmmv3_primer")
+    parser.add_argument("--use-bybit-balance", action="store_true")
     return parser.parse_args()
 
 
@@ -634,6 +676,11 @@ def main() -> None:
     if args.mm_tier != "none":
         maker_fee = _apply_mm_rebate(maker_fee, args.mm_tier)
 
+    starting_balances = None
+    if args.use_bybit_balance:
+        assets = ["USDT"] + [pair.symbol.replace("USDT", "") for pair in DEFAULT_PAIRS]
+        starting_balances = _fetch_bybit_balances(assets)
+
     engine, leader_instruments, follower_instruments = build_engine(
         DEFAULT_PAIRS,
         questdb,
@@ -644,6 +691,7 @@ def main() -> None:
         args.liquidity_consumption,
         maker_fee,
         taker_fee,
+        starting_balances,
     )
 
     data_dir = Path(args.data_dir)
