@@ -9,6 +9,20 @@
 
 ---
 
+## 3e) Inventory Ratio Metrics
+Script:
+- scripts/questdb_inventory_metrics.py
+
+Example:
+- /home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/questdb_inventory_metrics.py
+
+Table:
+- live_inventory_metrics
+
+Schema (ILP fields):
+- tags: venue, symbol
+- fields: equity_usdt, usdt_value, base_value, base_ratio, target_ratio, ratio_drift
+
 ## 1) VPS → Sentinel Sync
 Script:
 - scripts/pull_vps_ob_data.sh
@@ -62,6 +76,55 @@ Schema (ILP fields):
 - timestamp: bar close time in nanoseconds
 
 ---
+
+## 3b) Instrument Metadata Snapshot
+Script:
+- scripts/questdb_snapshot_instruments.py
+
+Example:
+- /home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/questdb_snapshot_instruments.py \
+  --symbols BTCUSDT,ETHUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT \
+  --venue BYBIT --venue BINANCE
+
+Table:
+- instrument_meta
+
+Schema (ILP fields):
+- tags: venue, symbol
+- fields: price_tick, qty_step, min_qty, max_qty, min_notional
+
+---
+
+## 3c) Fee Rates Snapshot (Bybit)
+Script:
+- scripts/questdb_snapshot_fees.py
+
+Example:
+- /home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/questdb_snapshot_fees.py \
+  --symbols BTCUSDT,ETHUSDT,SOLUSDT,DOGEUSDT,AVAXUSDT
+
+Table:
+- fee_rates
+
+Schema (ILP fields):
+- tags: venue, symbol
+- fields: maker_bps, taker_bps
+
+---
+
+## 3d) Balance Snapshot (Bybit)
+Script:
+- scripts/questdb_snapshot_balances.py
+
+Example:
+- /home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/questdb_snapshot_balances.py
+
+Table:
+- account_balances
+
+Schema (ILP fields):
+- tags: venue, currency
+- fields: total, free, locked
 
 ## 4) Backtest Loader
 Backtest script:
