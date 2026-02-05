@@ -173,8 +173,32 @@ class LeadLagMMv2(Strategy):
                 depth=self.config.book_depth,
             )
 
+        self._sync_position_with_exchange()
+
     def on_stop(self) -> None:
         gc.enable()
+
+    def _sync_position_with_exchange(self) -> None:
+        if self.follower_instrument is None:
+            return
+
+        account = self.cache.account_for_venue(self.config.follower_instrument_id.venue)
+        if account is None:
+            return
+
+        base_currency = self.follower_instrument.base_currency
+        wallet_balance = account.balance_total(base_currency)
+        if wallet_balance is None:
+            return
+
+        real_qty = wallet_balance.as_decimal() if hasattr(wallet_balance, "as_decimal") else Decimal(wallet_balance)
+        drift = real_qty - self._net_position
+        if drift != Decimal("0"):
+            self.log.warning(
+                f"START SYNC: Algo={self._net_position:.4f} vs Wallet={real_qty:.4f} -> Syncing.",
+                LogColor.YELLOW,
+            )
+            self._net_position = real_qty
 
     def on_order_book_deltas(self, deltas: OrderBookDeltas) -> None:
         if deltas.instrument_id == self.config.leader_instrument_id:

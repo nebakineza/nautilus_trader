@@ -1,4 +1,4 @@
-"""Lead-Lag Market Maker v003 Primer (VIP1 acquisition profile)."""
+"""Lead-Lag Market Maker v004 Primer (VIP1 acquisition profile - Latency Optimized)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ from decimal import Decimal
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.model.enums import OrderSide
 
-from strategy.lead_lag_bybit_binance_mm_v003 import LeadLagMMv3, LeadLagMMv3Config
+from strategy.lead_lag_bybit_binance_mm_v004 import LeadLagMMv4, LeadLagMMv4Config
 from strategy.metrics.questdb_writer import QuestDbILPWriter
 
 
-class LeadLagMMv3PrimerConfig(LeadLagMMv3Config, frozen=True, kw_only=True):
+class LeadLagMMv4PrimerConfig(LeadLagMMv4Config, frozen=True, kw_only=True):
     """VIP1 acquisition defaults (volume-focused, fee-neutral target)."""
 
     spread_bps: Decimal = Decimal("16.0")
@@ -27,12 +27,12 @@ class LeadLagMMv3PrimerConfig(LeadLagMMv3Config, frozen=True, kw_only=True):
     daily_killswitch_reset_secs: int = 86_400
 
 
-class LeadLagMMv3Primer(LeadLagMMv3):
-    """Lead-Lag MM v003 with VIP1 acquisition defaults."""
+class LeadLagMMv4Primer(LeadLagMMv4):
+    """Lead-Lag MM v004 with VIP1 acquisition defaults and latency optimizations."""
 
-    def __init__(self, config: LeadLagMMv3PrimerConfig) -> None:
+    def __init__(self, config: LeadLagMMv4PrimerConfig) -> None:
         super().__init__(config)
-        self._metrics = QuestDbILPWriter.from_env("LLMMv3Primer")
+        self._metrics = QuestDbILPWriter.from_env("LLMMv4Primer")
         self._daily_realized_start: Decimal | None = None
         self._daily_reset_ts: float = 0.0
 
@@ -40,15 +40,14 @@ class LeadLagMMv3Primer(LeadLagMMv3):
         if self.follower_instrument is None:
             return
 
-        account = self.cache.account_for_venue(self.config.follower_instrument_id.venue)
-        if account is None:
+        if self._cached_account is None:
             return
 
         base_currency = self.follower_instrument.base_currency
         quote_currency = self.follower_instrument.quote_currency
 
-        base_balance = account.balance_total(base_currency)
-        quote_balance = account.balance_total(quote_currency)
+        base_balance = self._cached_account.balance_total(base_currency)
+        quote_balance = self._cached_account.balance_total(quote_currency)
         if base_balance is None or quote_balance is None:
             return
 
@@ -60,7 +59,7 @@ class LeadLagMMv3Primer(LeadLagMMv3):
         self._metrics.send(
             table="live_account_snapshot",
             tags={
-                "strategy": "LLMMv3Primer",
+                "strategy": "LLMMv4Primer",
                 "venue": self.config.follower_instrument_id.venue.value,
                 "symbol": self.config.follower_instrument_id.symbol.value,
             },
@@ -99,7 +98,7 @@ class LeadLagMMv3Primer(LeadLagMMv3):
                 self._metrics.send(
                     table="live_fills",
                     tags={
-                        "strategy": "LLMMv3Primer",
+                        "strategy": "LLMMv4Primer",
                         "venue": self.config.follower_instrument_id.venue.value,
                         "symbol": self.config.follower_instrument_id.symbol.value,
                         "side": event.order_side.name,
