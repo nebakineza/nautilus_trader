@@ -1,3 +1,10 @@
+# =============================================================================
+# Nebakineza NautilusTrader .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Compiled / Binary files
+# -----------------------------------------------------------------------------
 *.c
 *.exp
 *.lib
@@ -5,101 +12,151 @@
 *.obj
 *.so
 *.xml
+*.pyc
+*.pyd
+**/*.rs.bk
 
+# -----------------------------------------------------------------------------
 # Git
+# -----------------------------------------------------------------------------
 *.diff
-
-# Logs and patches
-*.log
 *.patch
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+*.log
 log/
 logs/
 
-# Profiler and database
+# -----------------------------------------------------------------------------
+# Database / Profiler
+# -----------------------------------------------------------------------------
 *.prof
 *.rdb
 *.sqlite
+*.db
 
-# Secrets and environment files
+# -----------------------------------------------------------------------------
+# Secrets and Environment (CRITICAL - NEVER COMMIT)
+# -----------------------------------------------------------------------------
 *.key
 *.key_secret
 *.env
+.env*
+!.env.example
+secrets/
+credentials/
 
+# -----------------------------------------------------------------------------
 # Compressed files
+# -----------------------------------------------------------------------------
 *.tar.gz*
 *.zip
+*.gz
+*.bz2
 
-# Data
+# -----------------------------------------------------------------------------
+# Data files (large)
+# -----------------------------------------------------------------------------
 *.parquet
+*.data
+*.csv
+*.feather
+*.arrow
 
-# IntelliJ and VSCode project
+# -----------------------------------------------------------------------------
+# IDE / Editor
+# -----------------------------------------------------------------------------
 *.iml
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
 
-# Benchmarking and coverage
+# -----------------------------------------------------------------------------
+# Benchmarking / Coverage / Testing
+# -----------------------------------------------------------------------------
 .benchmarks*
 .coverage*
 htmlcov/
+.pytest_cache/
+.tox/
 
-# Rust related
+# -----------------------------------------------------------------------------
+# Rust
+# -----------------------------------------------------------------------------
 *target/
-**/*.rs.bk
+Cargo.lock
 
-# Python related
-*.pyc
-*.pyd
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
 .history*
 .cache/
 .codspeed/
 .mypy_cache/
 .profile/
-.pytest_cache/
 .python-version
 .ruff_cache/
 *dask-worker-space*
 __pycache__/
 .venv/
-.pytest_cache/
-
-# Local data outputs
-outputs/backtests/
-outputs/exports/
-outputs/sweeps/
-outputs/optuna/
-data/ob_data/
-data/ob_data_live/
-data/tick_data/
-data/tick_data_live/
-data/questdb/
-data/questdb_vps_backup/
-logs/
-
-# Large data files
-*.data
-cython_debug/
-requirements*
 venv*/
 .venv*/
-python/nautilus_trader/_libnautilus.pyi
-
-# Build environment and temp
-_build/
-build/
+*.egg-info/
 dist/
-env/
+build/
+_build/
+cython_debug/
+requirements*.txt
+
+# -----------------------------------------------------------------------------
+# Local data directories (NEVER COMMIT)
+# -----------------------------------------------------------------------------
+data/
+ob_data/
+tick_data/
+outputs/
+backtest_results*/
+sweep_results*/
+test_*/
+
+# -----------------------------------------------------------------------------
+# Production session files
+# -----------------------------------------------------------------------------
+SENTINEL-*.json
+*.session.json
+
+# -----------------------------------------------------------------------------
+# Optuna / ML
+# -----------------------------------------------------------------------------
+optuna*.db
+*.onnx
+*.pt
+*.pth
+models/
+
+# -----------------------------------------------------------------------------
+# Temporary / Build
+# -----------------------------------------------------------------------------
 *.bak
-*.sh
 *tmp/
 *temp/
+env/
+python/nautilus_trader/_libnautilus.pyi
 
-# System and editor specific
+# -----------------------------------------------------------------------------
+# System / OS
+# -----------------------------------------------------------------------------
 .DS_Store
 .null-ls*
-PERF.JSON
-output.json
+Thumbs.db
 
-# AI assistants and tools
+# -----------------------------------------------------------------------------
+# AI Assistants / Tools
+# -----------------------------------------------------------------------------
 .cursorignore
 .mcp.json
 .mcp.local.json
@@ -109,13 +166,14 @@ claude.config.json
 .cursor/
 .aider*
 .continue/
-
 AGENTS.md
 CLAUDE.md
 CODEX.md
 GEMINI.md
 
-# Nautilus specific
+# -----------------------------------------------------------------------------
+# Nautilus Specific
+# -----------------------------------------------------------------------------
 .ipynb_checkpoints/
 bench_data/
 /api_reference/
@@ -134,8 +192,25 @@ tests/unit_tests/catalog/
 tests/unit_tests/persistence/catalog/
 tests/test_data/**/backtest/**
 
-# Exceptions
+# -----------------------------------------------------------------------------
+# Reports / Misc
+# -----------------------------------------------------------------------------
+PERF.JSON
+output.json
+*.report.json
+wap_summary.json
+
+# -----------------------------------------------------------------------------
+# Bybit exports
+# -----------------------------------------------------------------------------
+Bybit-*.csv
+
+# -----------------------------------------------------------------------------
+# Exceptions (files to KEEP)
+# -----------------------------------------------------------------------------
 !tests/test_data/large/checksums.json
 !tests/test_data/nautilus/*/**.parquet
 !tests/integration_tests/adapters/betfair/responses/*.log
 !/nautilus_core/adapters/src/databento/test_data/*
+!.env.example
+!deploy/*.service
