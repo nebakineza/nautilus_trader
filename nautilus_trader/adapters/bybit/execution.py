@@ -34,6 +34,7 @@ from nautilus_trader.adapters.bybit.providers import BybitInstrumentProvider
 from nautilus_trader.cache.cache import Cache
 from nautilus_trader.common.component import LiveClock
 from nautilus_trader.common.component import MessageBus
+from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.common.enums import LogLevel
 from nautilus_trader.core import nautilus_pyo3
@@ -126,17 +127,21 @@ class BybitExecutionClient(LiveExecutionClient):
             BybitProductType.OPTION,
         )
 
+        # Determine venue - custom or default
+        venue = Venue(config.venue_name) if config.venue_name else BYBIT_VENUE
+        venue_str = venue.value
+
         if set(product_types) == {BybitProductType.SPOT}:
             self._account_type = AccountType.CASH
-            AccountFactory.register_cash_borrowing(BYBIT_VENUE.value)
+            AccountFactory.register_cash_borrowing(venue_str)
         else:
             # UTA (Unified Trading Account) for derivatives or mixed products
             self._account_type = AccountType.MARGIN
 
         super().__init__(
             loop=loop,
-            client_id=ClientId(name or BYBIT_VENUE.value),
-            venue=BYBIT_VENUE,
+            client_id=ClientId(name or venue_str),
+            venue=venue,
             oms_type=OmsType.NETTING,
             instrument_provider=instrument_provider,
             account_type=self._account_type,
@@ -171,9 +176,11 @@ class BybitExecutionClient(LiveExecutionClient):
         self._log.info(f"{config.ws_trade_timeout_secs=}", LogColor.BLUE)
         self._log.info(f"{config.http_proxy_url=}", LogColor.BLUE)
         self._log.info(f"{config.ws_proxy_url=}", LogColor.BLUE)
+        if config.venue_name:
+            self._log.info(f"Custom venue_name: {config.venue_name}", LogColor.BLUE)
 
         # Set account ID
-        account_id = AccountId(f"{name or BYBIT_VENUE.value}-UNIFIED")
+        account_id = AccountId(f"{name or venue_str}-UNIFIED")
         self._set_account_id(account_id)
 
         # Create pyo3 account ID for Rust HTTP client

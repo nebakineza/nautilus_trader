@@ -33,6 +33,7 @@ from nautilus_trader.data.messages import RequestQuoteTicks
 from nautilus_trader.data.messages import RequestTradeTicks
 from nautilus_trader.data.messages import SubscribeBars
 from nautilus_trader.data.messages import SubscribeFundingRates
+from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.data.messages import SubscribeOrderBook
 from nautilus_trader.data.messages import SubscribeQuoteTicks
 from nautilus_trader.data.messages import SubscribeTradeTicks
@@ -92,10 +93,14 @@ class BybitDataClient(LiveMarketDataClient):
         config: BybitDataClientConfig,
         name: str | None,
     ) -> None:
+        # Determine venue - custom or default
+        venue = Venue(config.venue_name) if config.venue_name else BYBIT_VENUE
+        venue_str = venue.value
+
         super().__init__(
             loop=loop,
-            client_id=ClientId(name or BYBIT_VENUE.value),
-            venue=BYBIT_VENUE,
+            client_id=ClientId(name or venue_str),
+            venue=venue,
             msgbus=msgbus,
             cache=cache,
             clock=clock,
@@ -124,6 +129,8 @@ class BybitDataClient(LiveMarketDataClient):
         self._log.info(f"{config.bars_timestamp_on_close=}", LogColor.BLUE)
         self._log.info(f"{config.http_proxy_url=}", LogColor.BLUE)
         self._log.info(f"{config.ws_proxy_url=}", LogColor.BLUE)
+        if config.venue_name:
+            self._log.info(f"Custom venue_name: {config.venue_name}", LogColor.BLUE)
 
         # HTTP API
         self._http_client = client

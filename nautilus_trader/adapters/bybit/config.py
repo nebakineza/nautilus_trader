@@ -30,6 +30,10 @@ class BybitDataClientConfig(LiveDataClientConfig, frozen=True):
 
     Parameters
     ----------
+    venue_name : str, optional
+        Custom venue name for routing (e.g., "BYBIT_SUI"). If ``None``, uses "BYBIT".
+        This allows multiple Bybit clients with different API keys to coexist
+        by routing orders to different "virtual" venues.
     api_key : str, optional
         The Bybit API public key.
         If ``None`` then will source the `BYBIT_API_KEY` or
@@ -70,6 +74,7 @@ class BybitDataClientConfig(LiveDataClientConfig, frozen=True):
 
     """
 
+    venue_name: str | None = None
     api_key: str | None = None
     api_secret: str | None = None
     product_types: tuple[BybitProductType, ...] | None = None
@@ -92,6 +97,11 @@ class BybitExecClientConfig(LiveExecClientConfig, frozen=True):
 
     Parameters
     ----------
+    venue_name : str, optional
+        Custom venue name for routing (e.g., "BYBIT_SUI"). If ``None``, uses "BYBIT".
+        This allows multiple Bybit clients with different API keys to coexist
+        by routing orders to different "virtual" venues. All clients on the same
+        account can see and manage each other's orders.
     api_key : str, optional
         The Bybit API public key.
         If ``None`` then will source the `BYBIT_API_KEY` or
@@ -170,6 +180,7 @@ class BybitExecClientConfig(LiveExecClientConfig, frozen=True):
 
     """
 
+    venue_name: str | None = None
     api_key: str | None = None
     api_secret: str | None = None
     product_types: tuple[BybitProductType, ...] | None = None
