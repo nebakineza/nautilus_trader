@@ -5,14 +5,15 @@ import json
 import os
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import quote
 import urllib.request
 
 from strategy.metrics.questdb_writer import QuestDbILPWriter
 
-STRATEGIES = ["LLMMv3", "StatArb"]
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOTUSDT", "LINKUSDT", "OPUSDT"]
+STRATEGIES = ["LLMMv3", "LLMMv3Primer", "StatArb"]
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOTUSDT", "LINKUSDT", "OPUSDT", "DOGEUSDT", "AVAXUSDT"]
 
 
 def _qdb(sql: str) -> dict:
@@ -39,36 +40,93 @@ def _get_prices() -> dict[str, Decimal]:
     return prices
 
 
+@dataclass
+class WapLedger:
+    inventory: Decimal = Decimal("0")
+    wap: Decimal = Decimal("0")
+    realized_pnl: Decimal = Decimal("0")
+    fees_paid: Decimal = Decimal("0")
+
+    def on_fill(self, side: str, price: Decimal, qty: Decimal, fee: Decimal) -> None:
+        self.fees_paid += fee
+        self.realized_pnl -= fee
+
+        if side == "BUY":
+            if self.inventory >= 0:
+                total_cost = (self.inventory * self.wap) + (qty * price)
+                self.inventory += qty
+                if self.inventory != 0:
+                    self.wap = total_cost / self.inventory
+            else:
+                remaining_short = abs(self.inventory)
+                if qty <= remaining_short:
+                    pnl = (self.wap - price) * qty
+                    self.realized_pnl += pnl
+                    self.inventory += qty
+                else:
+                    pnl = (self.wap - price) * remaining_short
+                    self.realized_pnl += pnl
+                    excess_qty = qty - remaining_short
+                    self.inventory = excess_qty
+                    self.wap = price
+        elif side == "SELL":
+            if self.inventory <= 0:
+                total_cost = (abs(self.inventory) * self.wap) + (qty * price)
+                self.inventory -= qty
+                if self.inventory != 0:
+                    self.wap = total_cost / abs(self.inventory)
+            else:
+                if qty <= self.inventory:
+                    pnl = (price - self.wap) * qty
+                    self.realized_pnl += pnl
+                    self.inventory -= qty
+                else:
+                    pnl = (price - self.wap) * self.inventory
+                    self.realized_pnl += pnl
+                    excess_qty = qty - self.inventory
+                    self.inventory = -excess_qty
+                    self.wap = price
+
+
+def _symbol_to_coin(symbol: str) -> str:
+    if symbol.endswith("USDT"):
+        return symbol.replace("USDT", "")
+    return symbol
+
+
 def _calc_pnl(rows: list[list], prices: dict[str, Decimal]) -> dict[str, Decimal]:
-    cash_pnl = Decimal("0")
-    commission = Decimal("0")
-    net_qty = defaultdict(Decimal)
+    ledgers: dict[str, WapLedger] = {}
 
     for symbol, side, qty, price, fee in rows:
         qty_d = Decimal(str(qty))
         price_d = Decimal(str(price))
-        if side == "BUY":
-            cash_pnl -= qty_d * price_d
-            net_qty[symbol] += qty_d
-        else:
-            cash_pnl += qty_d * price_d
-            net_qty[symbol] -= qty_d
-        if fee is not None:
-            commission += Decimal(str(fee))
+        fee_d = Decimal(str(fee)) if fee is not None else Decimal("0")
+        ledger = ledgers.setdefault(symbol, WapLedger())
+        ledger.on_fill(side, price_d, qty_d, fee_d)
 
-    inv_value = Decimal("0")
-    for symbol, qty in net_qty.items():
-        if symbol.endswith("USDT"):
-            coin = symbol.replace("USDT", "")
-        else:
-            coin = symbol
-        inv_value += qty * prices.get(coin, Decimal("0"))
+    inventory_value = Decimal("0")
+    unrealized_pnl = Decimal("0")
+    realized_pnl = Decimal("0")
+    commission = Decimal("0")
 
-    total = cash_pnl + inv_value - commission
+    for symbol, ledger in ledgers.items():
+        coin = _symbol_to_coin(symbol)
+        mark = prices.get(coin, Decimal("0"))
+        if ledger.inventory > 0:
+            unrealized_pnl += (mark - ledger.wap) * ledger.inventory
+        elif ledger.inventory < 0:
+            unrealized_pnl += (ledger.wap - mark) * abs(ledger.inventory)
+        inventory_value += ledger.inventory * mark
+        realized_pnl += ledger.realized_pnl
+        commission += ledger.fees_paid
+
+    total = realized_pnl + unrealized_pnl
     return {
-        "cash_pnl": cash_pnl,
+        "cash_pnl": realized_pnl,
+        "realized_pnl": realized_pnl,
+        "unrealized_pnl": unrealized_pnl,
         "commission": commission,
-        "inventory_value": inv_value,
+        "inventory_value": inventory_value,
         "total_pnl": total,
     }
 
@@ -99,6 +157,8 @@ def main() -> None:
                     tags={"strategy": strategy},
                     fields={
                         "cash_pnl": pnl["cash_pnl"],
+                        "realized_pnl": pnl["realized_pnl"],
+                        "unrealized_pnl": pnl["unrealized_pnl"],
                         "commission": pnl["commission"],
                         "inventory_value": pnl["inventory_value"],
                         "total_pnl": pnl["total_pnl"],

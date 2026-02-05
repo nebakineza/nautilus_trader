@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", required=True, help="Base tick_data directory.")
     parser.add_argument("--host", default="127.0.0.1", help="QuestDB ILP host (default: 127.0.0.1).")
     parser.add_argument("--port", type=int, default=9009, help="QuestDB ILP TCP port (default: 9009).")
+    parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout in seconds.")
     parser.add_argument("--table", default="trade_ticks", help="QuestDB table name.")
     parser.add_argument("--dry-run", action="store_true", help="Print ILP lines instead of sending.")
     return parser.parse_args()
@@ -54,7 +55,40 @@ def build_ilp(
     return f"{table},{tags} {fields} {ts_ms}000000\n"
 
 
-def ingest_file(path: Path, table: str, sock: socket.socket | None, dry_run: bool) -> int:
+def _send_line(
+    host: str,
+    port: int,
+    sock: socket.socket | None,
+    timeout: float,
+    payload: bytes,
+) -> socket.socket:
+    if sock is None:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+
+    try:
+        sock.sendall(payload)
+        return sock
+    except (TimeoutError, OSError):
+        try:
+            sock.close()
+        except Exception:
+            pass
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(payload)
+        return sock
+
+
+def ingest_file(
+    path: Path,
+    table: str,
+    sock: socket.socket | None,
+    dry_run: bool,
+    host: str,
+    port: int,
+    timeout: float,
+) -> tuple[int, socket.socket | None]:
     count = 0
     venue = "BYBIT"
     symbol = path.parent.name.split("_")[0]
@@ -87,10 +121,10 @@ def ingest_file(path: Path, table: str, sock: socket.socket | None, dry_run: boo
             if dry_run:
                 print(ilp, end="")
             else:
-                sock.sendall(ilp.encode("utf-8"))
+                sock = _send_line(host, port, sock, timeout, ilp.encode("utf-8"))
             count += 1
 
-    return count
+    return count, sock
 
 
 def main() -> None:
@@ -102,11 +136,13 @@ def main() -> None:
 
     sock: socket.socket | None = None
     if not args.dry_run:
-        sock = socket.create_connection((args.host, args.port), timeout=10)
+        sock = socket.create_connection((args.host, args.port), timeout=args.timeout)
+        sock.settimeout(args.timeout)
 
     total = 0
     for path in files:
-        total += ingest_file(path, args.table, sock, args.dry_run)
+        count, sock = ingest_file(path, args.table, sock, args.dry_run, args.host, args.port, args.timeout)
+        total += count
 
     if sock:
         sock.close()

@@ -18,6 +18,13 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="QuestDB ILP ingest for ob_data JSONL files.")
     parser.add_argument("--data-dir", required=True, help="Base ob_data directory.")
+    parser.add_argument("--symbols", default="", help="Comma-separated symbols to ingest (e.g., SOLUSDT,DOGEUSDT).")
+    parser.add_argument("--date", default="", help="Filter files by date prefix (YYYY-MM-DD).")
+    parser.add_argument(
+        "--default-venue",
+        default="",
+        help="Override venue tag when filename does not include bybit/binance (e.g., BYBIT).",
+    )
     parser.add_argument("--host", default="127.0.0.1", help="QuestDB ILP host (default: 127.0.0.1).")
     parser.add_argument("--port", type=int, default=9009, help="QuestDB ILP TCP port (default: 9009).")
     parser.add_argument("--table", default="orderbook_deltas", help="QuestDB table name.")
@@ -25,8 +32,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def iter_jsonl_files(base_dir: Path) -> list[Path]:
-    return sorted(base_dir.rglob("*.data"))
+def iter_jsonl_files(base_dir: Path, symbols: list[str], date_prefix: str) -> list[Path]:
+    files = sorted(base_dir.rglob("*.data"))
+    if symbols:
+        symbol_set = {s.upper() for s in symbols}
+        files = [f for f in files if any(sym in f.name.upper() for sym in symbol_set)]
+    if date_prefix:
+        files = [f for f in files if f.name.startswith(date_prefix)]
+    return files
 
 
 def build_ilp(
@@ -47,9 +60,21 @@ def build_ilp(
     return f"{table},{tags} {fields} {ts_ms}000000\n"
 
 
-def ingest_file(path: Path, table: str, sock: socket.socket | None, dry_run: bool) -> int:
+def ingest_file(
+    path: Path,
+    table: str,
+    sock: socket.socket | None,
+    dry_run: bool,
+    default_venue: str,
+) -> int:
     count = 0
-    venue = "BYBIT" if "bybit" in path.name.lower() else "BINANCE"
+    name = path.name.lower()
+    if "bybit" in name:
+        venue = "BYBIT"
+    elif "binance" in name:
+        venue = "BINANCE"
+    else:
+        venue = default_venue or "BINANCE"
     symbol = path.name.split("_")[1]
 
     with path.open("r", encoding="utf-8") as handle:
@@ -85,7 +110,8 @@ def ingest_file(path: Path, table: str, sock: socket.socket | None, dry_run: boo
 def main() -> None:
     args = parse_args()
     base_dir = Path(args.data_dir).expanduser().resolve()
-    files = iter_jsonl_files(base_dir)
+    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    files = iter_jsonl_files(base_dir, symbols, args.date)
     if not files:
         raise SystemExit(f"No .data files found under {base_dir}")
 
@@ -94,8 +120,9 @@ def main() -> None:
         sock = socket.create_connection((args.host, args.port), timeout=10)
 
     total = 0
+    default_venue = args.default_venue.strip().upper()
     for path in files:
-        total += ingest_file(path, args.table, sock, args.dry_run)
+        total += ingest_file(path, args.table, sock, args.dry_run, default_venue)
 
     if sock:
         sock.close()
