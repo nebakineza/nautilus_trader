@@ -1,0 +1,20 @@
+[Unit]
+Description=VIP AVAX Production - Lead/Lag Market Maker
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading
+EnvironmentFile=/home/ubuntu/trading/.env
+Environment=TRADER_ID=VIP1-PRODUCTION-AVAX
+Environment=NAUTILUS_LOG_DIR=/home/ubuntu/trading/logs
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python /home/ubuntu/trading/strategy_pkg/run_vip_avax_production.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vip_avax
+
+[Install]
+WantedBy=multi-user.target

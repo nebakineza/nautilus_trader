@@ -9,6 +9,9 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/trading
 EnvironmentFile=/home/ubuntu/trading/.env
 Environment=PYTHONPATH=/home/ubuntu/trading
+Environment=QUESTDB_ENABLED=true
+Environment=QUESTDB_ILP_HOST=127.0.0.1
+Environment=QUESTDB_ILP_PORT=9009
 ExecStart=/home/ubuntu/trading/nautilus_env/bin/python /home/ubuntu/trading/scripts/runners/run_live_trading_multi_v3_primer.py
 Restart=always
 RestartSec=5
