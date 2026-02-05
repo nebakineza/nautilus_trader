@@ -71,7 +71,7 @@ def load_questdb(
         sql = (
             "select timestamp, side, price, size, snapshot "
             f"from {cfg.table} "
-            f"where venue='{venue}' and symbol='{symbol}' "
+            f"where venue='{venue}' and \"symbol\"='{symbol}' "
             f"and timestamp >= '{start_ts}' and timestamp < '{end_ts}' "
             "order by timestamp"
         )

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""LLMMv3 Primer multi-pair backtest using QuestDB or local OB files.
+"""LLMMv4 Primer multi-pair backtest using QuestDB or local OB files (Latency Optimized).
 
-Supports SOL/DOGE/AVAX with Binance leader + Bybit follower data.
+Supports SOL/DOGE/AVAX/SUI with Binance leader + Bybit follower data.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from nautilus_trader.backtest.models import (
     TwoTierFillModel,
     VolumeSensitiveFillModel,
 )
-from strategy.lead_lag_bybit_binance_mm_v003_primer import LeadLagMMv3Primer, LeadLagMMv3PrimerConfig
+from strategy.lead_lag_bybit_binance_mm_v004_primer import LeadLagMMv4Primer, LeadLagMMv4PrimerConfig
 
 
 @dataclass(frozen=True)
@@ -663,8 +663,8 @@ def build_engine(
         leader = leader_instruments[pair.symbol]
         follower = follower_instruments[pair.symbol]
 
-        strategy = LeadLagMMv3Primer(
-            config=LeadLagMMv3PrimerConfig(
+        strategy = LeadLagMMv4Primer(
+            config=LeadLagMMv4PrimerConfig(
                 leader_instrument_id=leader.id,
                 follower_instrument_id=follower.id,
                 order_qty=pair.order_qty,
@@ -707,7 +707,7 @@ def build_engine(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LLMMv3 Primer multi-pair backtest")
+    parser = argparse.ArgumentParser(description="LLMMv4 Primer multi-pair backtest")
     parser.add_argument("--date", required=True, help="Date string YYYY-MM-DD")
     parser.add_argument("--max-updates", type=int, default=None, help="Max deltas per venue")
     parser.add_argument("--symbols", default=None, help="Comma-separated symbols to include")

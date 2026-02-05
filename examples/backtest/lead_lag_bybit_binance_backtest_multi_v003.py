@@ -112,7 +112,7 @@ def _precision_from_decimal(value: Decimal) -> int:
 def _infer_precision_from_questdb(cfg: QuestDbConfig, venue: str, symbol: str) -> tuple[int, int]:
     sql = (
         "select price, size from orderbook_deltas "
-        f"where venue='{venue}' and symbol='{symbol}' limit 1"
+        f"where venue='{venue}' and \"symbol\"='{symbol}' limit 1"
     )
     data = load_questdb.__globals__["_query_json"](cfg, sql)
     dataset = data.get("dataset", [])

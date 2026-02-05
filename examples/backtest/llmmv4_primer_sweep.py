@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sweep runner for LLMMv3 Primer backtests.
+"""Sweep runner for LLMMv4 Primer backtests.
 
 Runs multiple profile/fee combinations and stores results in separate folders.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LLMMv3 Primer sweep runner")
+    parser = argparse.ArgumentParser(description="LLMMv4 Primer sweep runner")
     parser.add_argument("--date", required=True, help="Date string YYYY-MM-DD")
     parser.add_argument("--questdb", action="store_true")
     parser.add_argument("--questdb-host", default="127.0.0.1")
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-position-qty-values", default="")
     parser.add_argument("--internal-price-delta-limit-values", default="")
     parser.add_argument("--max-updates", type=int, default=None)
-    parser.add_argument("--out-root", default="backtest_results/llmmv3_primer_sweeps")
+    parser.add_argument("--out-root", default="backtest_results/llmmv4_primer_sweeps")
     parser.add_argument("--metrics-host", default="127.0.0.1")
     parser.add_argument("--metrics-port", type=int, default=9009)
     parser.add_argument("--metrics-lake-table", default="backtest_results_lake")
@@ -135,7 +135,7 @@ def main() -> None:
     out_root = Path(args.out_root) / stamp
     out_root.mkdir(parents=True, exist_ok=True)
 
-    runner = Path(__file__).with_name("llmmv3_primer_backtest.py")
+    runner = Path(__file__).with_name("llmmv4_primer_backtest.py")
 
     results = []
     for profile in profiles:
