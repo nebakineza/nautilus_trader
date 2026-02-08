@@ -10,15 +10,16 @@ This document orients automated agents to the project structure, data pipeline, 
 ```
 nautilus_trader/
 ├── strategy/                    # Strategy implementations
-│   ├── lead_lag_bybit_binance_mm_v005_primer.py  # PRODUCTION (Feb 2026)
-│   ├── lead_lag_bybit_binance_mm_v006_turbo.py   # Performance-optimized (testing)
-│   ├── lead_lag_bybit_binance_mm_v004_primer.py  # Legacy
-│   ├── hft_obi_*.py                              # HFT OBI strategies
-│   ├── triangular_arb_v00*.py                    # Triangular arbitrage
-│   ├── inventory/                                # Inventory management
+│   ├── lead_lag_bybit_binance_mm_v008_timekeeper.py  # PRODUCTION (Feb 2026)
+│   ├── lead_lag_bybit_binance_mm_v007_fortress.py    # Previous production
+│   ├── lead_lag_bybit_binance_mm_v006_turbo.py       # Performance-optimized
+│   ├── lead_lag_bybit_binance_mm_v005_primer.py      # Legacy
+│   ├── hft_obi_*.py                                  # HFT OBI strategies
+│   ├── triangular_arb_v00*.py                        # Triangular arbitrage
+│   ├── inventory/                                    # Inventory management
 │   │   └── cross_pair_coordinator.py
-│   ├── analysis/                                 # Strategy analysis tools
-│   └── metrics/                                  # Performance metrics
+│   ├── analysis/                                     # Strategy analysis tools
+│   └── metrics/                                      # Performance metrics
 ├── examples/
 │   ├── backtest/               # Backtest runners and loaders
 │   │   ├── llmmv4_primer_backtest.py
@@ -27,8 +28,8 @@ nautilus_trader/
 │       └── bybit/
 ├── scripts/
 │   ├── runners/                # Production strategy runners
-│   │   ├── run_vip_*.py        # Per-pair VIP runners (8 pairs)
-│   │   └── run_vip_sui_v6.py   # v006 turbo test runner
+│   │   ├── run_vip_*_v8.py     # Per-pair v008 runners (10 pairs)
+│   │   └── run_vip_*_v6.py     # Legacy v006 runners
 │   ├── questdb_*.py            # QuestDB ingest/query scripts
 │   ├── coinapi_*.py            # CoinAPI data ingest scripts
 │   └── sweep_*.py              # Parameter sweep scripts
@@ -54,125 +55,151 @@ nautilus_trader/
 
 ## Strategies
 
-### 1. Lead/Lag Market Maker v005 (PRODUCTION - Feb 2026)
-**File:** `strategy/lead_lag_bybit_binance_mm_v005_primer.py`
-**Runners:** `scripts/runners/run_vip_{pair}.py` (8 separate services)
+### 1. Lead/Lag Market Maker v008 TIMEKEEPER (PRODUCTION - Feb 2026)
+**File:** \`strategy/lead_lag_bybit_binance_mm_v008_timekeeper.py\`
+**Runners:** \`scripts/runners/run_vip_{pair}_v8.py\` (10 separate services)
+**Version:** v008.14
 
 **Architecture:**
 - **Leader:** Binance SPOT orderbook feeds signal
 - **Follower:** Bybit SPOT executes trades
 - **Event-Driven:** Refreshes quotes on Leader/Follower book updates
-- **Batching:** Uses `SubmitOrderList` for atomic bid/ask placement
+- **Order Management:** Cancel-replace with IOC aggressive exits
 
-**Key Features:**
-- Regime detection (RANGING/TRENDING) with auto spread/size adjustment
-- Guardian system: Auto-widens spreads on negative realized PnL
-- Killswitch: Equity drawdown protection
-- OFI (Order Flow Imbalance) signal integration
+**Key Features (v008):**
+- **TIMEKEEPER**: Inventory age tracking with forced exits
+- **FIFO P&L**: Per-trade profit tracking with timestamps
+- **Balance Capping**: Prevents "Insufficient balance" rejections
+- **Entry Quality Filter**: Blocks entries during strong trends
+- **Regime Detection**: RANGING/TRENDING with auto spread/size adjustment
+- **Underwater Exit**: Skews quotes to exit losing positions faster
+- **Runaway Detection**: Pauses one-sided fills
 
 **Key Parameters:**
 ```python
-spread_bps=60.0              # Target spread in basis points
-order_qty=20.0               # Base order size
-max_position_qty=200.0       # Maximum inventory
-regime_trending_spread_mult=2.0  # 2x spread in trends
-regime_trending_size_mult=0.5    # 0.5x size in trends
+spread_bps=80.0                    # Target spread in basis points
+order_qty=20.0                     # Base order size
+max_position_qty=200.0             # Maximum inventory
+inventory_max_hold_secs=1800       # Force exit after 30min
+entry_quality_max_trend_strength=0.50  # Block entry if trend > 50%
+fifo_pnl_enabled=True              # Track per-trade P&L
+underwater_exit_enabled=True       # Skew to exit losers
 ```
 
-**Instrument ID Format:**
-- Leader: `{SYMBOL}.BINANCE_SPOT` (e.g., `SUIUSDT.BINANCE_SPOT`)
-- Follower: `{SYMBOL}-SPOT.BYBIT` (e.g., `SUIUSDT-SPOT.BYBIT`)
+**Critical Fixes (v008.14):**
+- SELL orders capped to \`net_position * 0.98\` (prevents over-selling)
+- Aggressive exits cancel open orders first + 90% balance buffer
+- Minimum order value check (\$5.50 for Bybit)
+- Balance tracking updated on every fill
 
-### 2. Lead/Lag Market Maker v006 TURBO (Testing)
-**File:** `strategy/lead_lag_bybit_binance_mm_v006_turbo.py`
-**Status:** Performance-optimized rewrite, in testing
+**Instrument ID Format:**
+- Leader: \`{SYMBOL}.BINANCE_SPOT\` (e.g., \`SUIUSDT.BINANCE_SPOT\`)
+- Follower: \`{SYMBOL}-SPOT.BYBIT\` (e.g., \`SUIUSDT-SPOT.BYBIT\`)
+
+### 2. Lead/Lag Market Maker v007 FORTRESS (Previous)
+**File:** \`strategy/lead_lag_bybit_binance_mm_v007_fortress.py\`
+**Status:** Deprecated - replaced by v008
+
+### 3. Lead/Lag Market Maker v006 TURBO (Performance)
+**File:** \`strategy/lead_lag_bybit_binance_mm_v006_turbo.py\`
+**Status:** Performance-optimized rewrite, available for testing
 
 **Optimizations over v005:**
 - Float64 arithmetic (no Decimal in hot path) - 4x faster
 - Ring buffers (no heap allocations)
 - Guarded logging - 17x faster when disabled
 - Pre-computed constants
-- `__slots__` for faster attribute access
+- \`__slots__\` for faster attribute access
 
-### 3. Legacy Strategies
-- `lead_lag_bybit_binance_mm_v004_primer.py` - Previous production
-- `lead_lag_bybit_binance_mm_v003.py` - Legacy
+### 4. Legacy Strategies
+- \`lead_lag_bybit_binance_mm_v005_primer.py\` - Previous production
+- \`lead_lag_bybit_binance_mm_v004_primer.py\` - Legacy
+- \`lead_lag_bybit_binance_mm_v003.py\` - Legacy
 
 ---
 
 ## Live Deployment (VPS: sentinel-vps)
 
-### Current Production (Feb 2026) - 8 Pair Portfolio
+### Current Production (Feb 2026) - 10 Pair Portfolio (v008)
 ```
 /home/ubuntu/trading/
 ├── strategy_pkg/
-│   ├── run_vip_sui.py          # MAINACC_01
-│   ├── run_vip_link.py         # MAINACC_02
-│   ├── run_vip_avax.py         # MAINACC_03
-│   ├── run_vip_ena.py          # MAINACC_04
-│   ├── run_vip_near.py         # MAINACC_05
-│   ├── run_vip_arb.py          # MAINACC_06
-│   ├── run_vip_ondo.py         # MAINACC_07
-│   ├── run_vip_ton.py          # MAINACC_08
-│   └── lead_lag_bybit_binance_mm_v005_primer.py
-├── .env                        # API keys (MAINACC_01-08)
-├── logs/                       # Per-pair logs
-└── runtime_env/                # Python environment
+│   ├── run_vip_sui_v8.py           # MAINACC_01
+│   ├── run_vip_link_v8.py          # MAINACC_02
+│   ├── run_vip_avax_v8.py          # MAINACC_03
+│   ├── run_vip_ena_v8.py           # MAINACC_04
+│   ├── run_vip_near_v8.py          # MAINACC_05
+│   ├── run_vip_arb_v8.py           # MAINACC_06
+│   ├── run_vip_ondo_v8.py          # MAINACC_07
+│   ├── run_vip_ton_v8.py           # MAINACC_08
+│   ├── run_vip_sei_v8.py           # MAINACC_09
+│   ├── run_vip_apt_v8.py           # MAINACC_10
+│   └── lead_lag_bybit_binance_mm_v008_timekeeper.py
+├── .env                            # API keys (MAINACC_01-10)
+├── logs/                           # Per-pair logs
+└── runtime_env/                    # Python environment
 ```
 
-### Active Pairs Configuration
-| Pair | API Key | Order Qty | Spread | Notes |
-|------|---------|-----------|--------|-------|
-| SUIUSDT | MAINACC_01 | 20 SUI | 60bps | Primary |
-| LINKUSDT | MAINACC_02 | 1 LINK | 60bps | |
-| AVAXUSDT | MAINACC_03 | 1 AVAX | 60bps | |
-| ENAUSDT | MAINACC_04 | 50 ENA | 60bps | |
-| NEARUSDT | MAINACC_05 | 10 NEAR | 60bps | |
-| ARBUSDT | MAINACC_06 | 50 ARB | 60bps | |
-| ONDOUSDT | MAINACC_07 | 25 ONDO | 60bps | |
-| TONUSDT | MAINACC_08 | 5 TON | 60bps | |
+### Active Pairs Configuration (v008)
+| Pair | API Key | Spread | Max Hold | Entry Filter | Notes |
+|------|---------|--------|----------|--------------|-------|
+| SUIUSDT | MAINACC_01 | 120bps | 600s | 0.40 | Tuned |
+| LINKUSDT | MAINACC_02 | 150bps | 300s | 0.25 | Aggressive |
+| AVAXUSDT | MAINACC_03 | 80bps | 1800s | 0.50 | Default |
+| ENAUSDT | MAINACC_04 | 80bps | 1800s | 0.50 | Default |
+| NEARUSDT | MAINACC_05 | 80bps | 1800s | 0.50 | Default |
+| ARBUSDT | MAINACC_06 | 80bps | 1800s | 0.50 | Default |
+| ONDOUSDT | MAINACC_07 | 80bps | 1800s | 0.50 | Default |
+| TONUSDT | MAINACC_08 | 80bps | 1800s | 0.50 | Default |
+| SEIUSDT | MAINACC_09 | 120bps | 600s | 0.35 | Tuned |
+| APTUSDT | MAINACC_10 | 150bps | 300s | 0.30 | Aggressive |
 
-### Systemd Services
+### Systemd Services (v008)
 ```bash
-# List all services
-sudo systemctl list-units 'vip_*.service'
+# List all v008 services
+sudo systemctl list-units 'vip_*_v8.service'
 
 # Per-pair management
-sudo systemctl status vip_sui.service
-sudo systemctl restart vip_sui.service
-sudo journalctl -u vip_sui.service -f
+sudo systemctl status vip_sui_v8.service
+sudo systemctl restart vip_sui_v8.service
+sudo journalctl -u vip_sui_v8.service -f
 
 # Restart all pairs
-for svc in sui link avax ena near arb ondo ton; do
-  sudo systemctl restart vip_$svc.service
+for pair in sui link avax ena near arb ondo ton sei apt; do
+  sudo systemctl restart vip_\${pair}_v8.service
 done
 ```
 
 ### Deploy Updates
 ```bash
 # Deploy strategy file
-scp strategy/lead_lag_bybit_binance_mm_v005_primer.py \
+scp strategy/lead_lag_bybit_binance_mm_v008_timekeeper.py \\
     sentinel-vps:/home/ubuntu/trading/strategy_pkg/
 
 # Deploy specific runner
-scp scripts/runners/run_vip_sui.py \
+scp scripts/runners/run_vip_sui_v8.py \\
     sentinel-vps:/home/ubuntu/trading/strategy_pkg/
 
 # Restart service
-ssh sentinel-vps "sudo systemctl restart vip_sui.service"
+ssh sentinel-vps "sudo systemctl restart vip_sui_v8.service"
+
+# Restart all v008 services
+ssh sentinel-vps 'for pair in sui link avax ena near arb ondo ton sei apt; do
+  sudo systemctl restart vip_\${pair}_v8.service
+done'
 ```
 
 ### API Keys Structure
-- `BYBIT_API_KEY_MAINACC_00` - Local development (sentinel)
-- `BYBIT_API_KEY_MAINACC_01-08` - VPS production (IP-bound)
+- \`BYBIT_API_KEY_MAINACC_00\` - Local development (sentinel)
+- \`BYBIT_API_KEY_MAINACC_01-10\` - VPS production (IP-bound)
 
 ---
 
 ## Fee Profile (Bybit VIP0 + MNT Discount)
-- Maker: 0.075% (7.5 bps)
-- Taker: 0.075% (7.5 bps)
-- Roundtrip: 15 bps
-- **Minimum profitable spread: >15 bps**
+- Maker: 0.10% (10 bps)
+- Taker: 0.10% (10 bps)
+- Roundtrip: 20 bps
+- **Minimum profitable spread: >20 bps**
 
 ---
 
@@ -185,20 +212,20 @@ rsync -avz sentinel-vps:/path/to/data/ ./data/ob_data/
 
 ### 2. Ingest to QuestDB
 ```bash
-.venv/bin/python scripts/questdb_ingest_ob_data.py \
+.venv/bin/python scripts/questdb_ingest_ob_data.py \\
     --source data/ob_data/ --symbol SUIUSDT
 ```
 
 ### 3. CoinAPI Historical
 ```bash
 export COIN_API="your-api-key"
-.venv/bin/python scripts/coinapi_flatfiles_ingest_orderbook.py \
+.venv/bin/python scripts/coinapi_flatfiles_ingest_orderbook.py \\
     --date 2026-01-28 --exchange BINANCE --symbol SUIUSDT
 ```
 
 ### 4. Backtest
 ```bash
-.venv/bin/python examples/backtest/llmmv4_primer_backtest.py \
+.venv/bin/python examples/backtest/llmmv4_primer_backtest.py \\
     --pair SUIUSDT --date 2026-01-28 --spread-bps 60 --profile balanced
 ```
 
@@ -226,45 +253,58 @@ export COIN_API="your-api-key"
 
 ## Operational Guidance
 
-### Performance Monitoring
+### Performance Monitoring (v008)
 ```bash
 # Check all pairs status
-for pair in sui link avax ena near arb ondo ton; do
-  echo "=== ${pair^^} ==="
-  grep -c 'OrderFilled' /home/ubuntu/trading/logs/vip_${pair}.log
-done
+ssh sentinel-vps 'for pair in sui link avax ena near arb ondo ton sei apt; do
+  echo "=== \${pair^^} ==="
+  journalctl -u vip_\${pair}_v8.service --no-pager --since "1 hour ago" | grep -c "OrderFilled"
+done'
+
+# Check rejection status
+ssh sentinel-vps 'for pair in sui link avax ena near arb ondo ton sei apt; do
+  insuff=\$(journalctl -u vip_\${pair}_v8.service --no-pager --since "1 hour ago" | grep -c "Insufficient balance")
+  value=\$(journalctl -u vip_\${pair}_v8.service --no-pager --since "1 hour ago" | grep -c "value exceeded")
+  postonly=\$(journalctl -u vip_\${pair}_v8.service --no-pager --since "1 hour ago" | grep -c "PostOnly")
+  printf "%-6s: insuff=%s value=%s postonly=%s\\n" "\${pair^^}" "\$insuff" "\$value" "\$postonly"
+done'
 
 # Check regime changes
-grep 'REGIME CHANGE' /home/ubuntu/trading/logs/vip_*.log | tail -20
+ssh sentinel-vps 'journalctl -u "vip_*_v8.service" --since "1 hour ago" | grep "REGIME:" | tail -20'
 
-# Check guardian triggers
-grep 'GUARDIAN' /home/ubuntu/trading/logs/vip_*.log | tail -10
+# Check force exits
+ssh sentinel-vps 'journalctl -u "vip_*_v8.service" --since "1 hour ago" | grep "FORCE EXIT" | tail -10'
 ```
 
-### Common Issues & Fixes
+### Common Issues & Fixes (v008)
 
-1. **Killswitch Triggering**
-   - Symptom: "KILLSWITCH TRIGGERED: Drawdown X%"
-   - Fix: Set `max_drawdown_pct=Decimal("1.00")` (disabled)
+1. **"Insufficient balance" Rejections**
+   - Fixed in v008.14: SELL orders capped to \`net_position * 0.98\`
+   - Aggressive exits use 90% buffer and cancel open orders first
 
-2. **Guardian Widening Too Much**
-   - Symptom: "Widening spread +40.0bps"
-   - Fix: Guardian is working correctly - wait for spread to relax
+2. **"Order value exceeded lower limit"**
+   - Fixed in v008.13: Minimum order value check (\$5.50)
+   - Orders below this are skipped (dust positions)
 
-3. **Binance Connection Error**
-   - Symptom: `instrument_id.venue BINANCE_SPOT != BINANCE`
-   - Fix: Use `.BINANCE_SPOT` for leader instrument IDs
+3. **"EC_PostOnlyWillTakeLiquidity"**
+   - Normal behavior - market moved and our price crossed spread
+   - Not an error - Bybit correctly rejected to prevent taking liquidity
 
-4. **Order Value Too Low**
-   - Symptom: `Order value exceeded lower limit`
-   - Fix: Increase `order_qty` to meet Bybit minimums
+4. **Trend Filter Pausing**
+   - Symptom: "TREND FILTER: EMA=X > threshold for Y ticks | PAUSING"
+   - Normal behavior - strategy pauses during strong trends
+   - Adjust \`entry_quality_max_trend_strength\` if too aggressive
+
+5. **Force Exit Skipped**
+   - Symptom: "FORCE EXIT SKIPPED: Order value \$X below \$5 min"
+   - Dust position too small to exit - will be combined with future trades
 
 ### Best Practices
-- Use `tags=["smp_type=CancelMaker"]` for self-match prevention
-- Enable `post_only=True` for maker-only orders
-- Keep spread_bps > 15 (fee breakeven for VIP0+MNT)
-- Monitor win rate: target >70%
-- Monitor avg net: target >20 bps per trade
+- Use \`spread_bps > 20\` (fee breakeven for VIP0+MNT)
+- Set \`inventory_max_hold_secs\` based on pair volatility (300-1800s)
+- Tighter \`entry_quality_max_trend_strength\` for volatile pairs (0.25-0.40)
+- Monitor win rate: target >60%
+- Monitor realized spread: target >20 bps after fees
 
 ---
 
@@ -273,33 +313,44 @@ grep 'GUARDIAN' /home/ubuntu/trading/logs/vip_*.log | tail -10
 **NEVER commit:**
 - API keys, secrets, passwords
 - VPS IPs, SSH keys
-- `.env` files
-- Session/state files (`SENTINEL-*.json`)
+- \`.env\` files
+- Session/state files (\`SENTINEL-*.json\`)
 
 **Use:**
-- `.ssh/config` for remote access aliases
+- \`.ssh/config\` for remote access aliases
 - Environment variables for credentials
-- `.gitignore` for sensitive files
+- \`.gitignore\` for sensitive files
 
 ---
 
-## Quick Reference
+## Quick Reference (v008)
 
 ```bash
 # Check all VPS services
-ssh sentinel-vps "sudo systemctl list-units 'vip_*.service' --no-pager"
+ssh sentinel-vps "sudo systemctl list-units 'vip_*_v8.service' --no-pager"
 
 # View live logs for SUI
-ssh sentinel-vps "tail -f /home/ubuntu/trading/logs/vip_sui.log"
+ssh sentinel-vps "journalctl -u vip_sui_v8.service -f"
 
-# Check P&L summary
-ssh sentinel-vps "grep 'FILL PAIR:' /home/ubuntu/trading/logs/vip_*.log | tail -20"
+# Check fills summary
+ssh sentinel-vps 'for pair in sui link avax ena near arb ondo ton sei apt; do
+  fills=\$(journalctl -u vip_\${pair}_v8.service --no-pager --since "1 hour ago" | grep -c "OrderFilled")
+  printf "%-6s: %s fills\\n" "\${pair^^}" "\$fills"
+done'
 
-# Count fills today
-ssh sentinel-vps "grep 'OrderFilled' /home/ubuntu/trading/logs/vip_*.log | wc -l"
+# Check rejection summary  
+ssh sentinel-vps 'journalctl --since "1 hour ago" | grep -cE "Insufficient balance|value exceeded lower limit"'
 
 # Restart all services
-ssh sentinel-vps "for s in sui link avax ena near arb ondo ton; do sudo systemctl restart vip_\$s; done"
+ssh sentinel-vps 'for pair in sui link avax ena near arb ondo ton sei apt; do
+  sudo systemctl restart vip_\${pair}_v8.service
+done'
+
+# Deploy and restart
+scp strategy/lead_lag_bybit_binance_mm_v008_timekeeper.py sentinel-vps:/home/ubuntu/trading/strategy_pkg/ && \\
+ssh sentinel-vps 'for pair in sui link avax ena near arb ondo ton sei apt; do
+  sudo systemctl restart vip_\${pair}_v8.service
+done'
 
 # Check QuestDB
 /home/seb/questdb-9.3.2-rt-linux-x86-64/bin/questdb.sh status
