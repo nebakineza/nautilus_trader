@@ -1,0 +1,18 @@
+[Unit]
+Description=Ranger Grid MM v011 - AVAXUSDT (RG02 account)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python /home/ubuntu/trading/strategy_pkg/run_ranger_grid_avax_v011.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/trading/logs/vip_ranger_avax_v011.log
+StandardError=append:/home/ubuntu/trading/logs/vip_ranger_avax_v011.log
+
+[Install]
+WantedBy=multi-user.target

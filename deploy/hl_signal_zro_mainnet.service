@@ -1,0 +1,24 @@
+[Unit]
+Description=Hyperliquid Signal Trader ZRO Mainnet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seb
+Group=seb
+WorkingDirectory=/home/seb/nebakineza/nautilus_trader
+EnvironmentFile=/home/seb/nebakineza/nautilus_trader/.env
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/hyperliquid/run_hl_signal_zro_mainnet.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hl-signal-zro-mainnet
+
+# Safety: auto-restart if the process dies, but don't restart too fast
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=Confluence Scanner v003 - AlphaScan01 (RSI+KDJ+BB+MACD)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python /home/ubuntu/trading/strategy_pkg/run_confluence_scanner_v003.py
+Restart=always
+RestartSec=120
+StandardOutput=append:/home/ubuntu/trading/logs/confluence_as01_v003.log
+StandardError=append:/home/ubuntu/trading/logs/confluence_as01_v003.log
+
+[Install]
+WantedBy=multi-user.target

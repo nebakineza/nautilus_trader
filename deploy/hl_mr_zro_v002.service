@@ -1,0 +1,29 @@
+[Unit]
+Description=Mean Reversion v002 - ZRO on Hyperliquid
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seb
+WorkingDirectory=/home/seb/nebakineza/nautilus_trader
+Environment=HYPERLIQUID_WALLET_API=__REPLACE_WITH_KEY__
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python \
+    scripts/runners/run_hl_mean_reversion_zro_v002.py \
+    --coin ZRO \
+    --bar-interval 5m \
+    --entry-band 1.0 \
+    --exit-band 1.5 \
+    --ema-fast 34 \
+    --ema-slow 89 \
+    --size 50 \
+    --max-size 150 \
+    --log-level INFO
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hl_mr_zro_v002
+
+[Install]
+WantedBy=multi-user.target

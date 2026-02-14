@@ -1,0 +1,24 @@
+[Unit]
+Description=Hyperliquid Grid MM v001 GENESIS — ZRO Mainnet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seb
+WorkingDirectory=/home/seb/nebakineza/nautilus_trader
+EnvironmentFile=/home/seb/nebakineza/nautilus_trader/.env
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/hyperliquid/run_hl_grid_zro_mainnet.py
+Restart=on-failure
+RestartSec=30
+SyslogIdentifier=hl-grid-zro-mainnet
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=2G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

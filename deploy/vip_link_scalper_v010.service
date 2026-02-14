@@ -1,0 +1,18 @@
+[Unit]
+Description=VIP LINK v010 Scalper - Lead-Lag
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python /home/ubuntu/trading/strategy_pkg/run_scalper_link_v10.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/trading/logs/vip_link_scalper_v010.log
+StandardError=append:/home/ubuntu/trading/logs/vip_link_scalper_v010.log
+
+[Install]
+WantedBy=multi-user.target

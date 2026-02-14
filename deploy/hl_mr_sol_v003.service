@@ -1,0 +1,31 @@
+[Unit]
+Description=Mean Reversion v003 JAMES — SOL-USD-PERP on Hyperliquid
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seb
+WorkingDirectory=/home/seb/nebakineza/nautilus_trader
+EnvironmentFile=/home/seb/nebakineza/nautilus_trader/.env
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python \
+    scripts/runners/run_hl_mean_reversion_sol_v003.py \
+    --bar-interval 5m \
+    --size 150 \
+    --max-size 200 \
+    --sniper \
+    --log-level INFO
+
+Restart=on-failure
+RestartSec=30
+SyslogIdentifier=hl-mr-sol-v003
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=2G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

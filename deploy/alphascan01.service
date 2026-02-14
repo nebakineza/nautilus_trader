@@ -1,0 +1,35 @@
+[Unit]
+Description=AlphaScan01 - SafeAlpha Scanner Strategy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+Environment="PATH=/home/ubuntu/trading/runtime_env/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python run_alphascan01.py
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alphascan01
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=100%
+
+# Security
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/trading/logs
+
+[Install]
+WantedBy=multi-user.target

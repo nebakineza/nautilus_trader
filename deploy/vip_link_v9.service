@@ -1,0 +1,18 @@
+[Unit]
+Description=VIP LINK v009 SNIPER - Range Detection HFT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python /home/ubuntu/trading/strategy_pkg/run_sniper_link_v9.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/trading/logs/vip_link_v9.log
+StandardError=append:/home/ubuntu/trading/logs/vip_link_v9.log
+
+[Install]
+WantedBy=multi-user.target

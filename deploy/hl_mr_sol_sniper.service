@@ -1,0 +1,30 @@
+[Unit]
+Description=Mean Reversion v003 SNIPER — SOL-USD-PERP 1h on Hyperliquid (100%% WR)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seb
+WorkingDirectory=/home/seb/nebakineza/nautilus_trader
+EnvironmentFile=/home/seb/nebakineza/nautilus_trader/.env
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python \
+    scripts/runners/run_hl_mean_reversion_sol_sniper.py \
+    --auto-scale \
+    --leverage 5.0 \
+    --max-daily-loss 500 \
+    --log-level INFO
+
+Restart=on-failure
+RestartSec=30
+SyslogIdentifier=hl-mr-sol-sniper
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=2G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

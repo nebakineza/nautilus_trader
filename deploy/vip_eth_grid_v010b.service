@@ -1,0 +1,18 @@
+[Unit]
+Description=VIP ETH Spot Grid Bot v010b (SG01 account)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python /home/ubuntu/trading/strategy_pkg/run_grid_eth_v010b.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/trading/logs/vip_eth_grid_v010b.log
+StandardError=append:/home/ubuntu/trading/logs/vip_eth_grid_v010b.log
+
+[Install]
+WantedBy=multi-user.target

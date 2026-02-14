@@ -1,0 +1,18 @@
+[Unit]
+Description=VIP XRP SpotGridAdvanced v001 - SGA01
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading/strategy_pkg
+EnvironmentFile=/home/ubuntu/trading/.env
+ExecStart=/home/ubuntu/trading/runtime_env/bin/python /home/ubuntu/trading/strategy_pkg/run_spot_grid_advanced_link_sga01_v001.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/trading/logs/vip_xrp_spotgridadv_sga01_v001.log
+StandardError=append:/home/ubuntu/trading/logs/vip_xrp_spotgridadv_sga01_v001.log
+
+[Install]
+WantedBy=multi-user.target

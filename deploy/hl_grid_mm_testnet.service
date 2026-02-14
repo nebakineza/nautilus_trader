@@ -1,0 +1,28 @@
+[Unit]
+Description=Hyperliquid Grid MM v001 GENESIS — ETH Testnet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seb
+WorkingDirectory=/home/seb/nebakineza/nautilus_trader
+EnvironmentFile=/home/seb/nebakineza/nautilus_trader/.env
+ExecStart=/home/seb/nebakineza/nautilus_trader/.venv/bin/python scripts/hyperliquid/run_hl_grid_volume_testnet.py
+
+# Restart on crash, but not on clean shutdown (exit 0)
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hl-grid-mm-testnet
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
