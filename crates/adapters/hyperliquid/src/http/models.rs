@@ -59,6 +59,41 @@ impl Cloid {
         Ok(Self(bytes))
     }
 
+    /// Creates a `Cloid` from any `ClientOrderId` string.
+    ///
+    /// If the string is already a valid `0x` hex CLOID, parses it directly.
+    /// Otherwise, deterministically converts the string to a 128-bit hex value
+    /// using FNV-1a-inspired hashing (zero external dependencies).
+    pub fn from_client_order_id<S: AsRef<str>>(s: S) -> Result<Self, String> {
+        let value = s.as_ref();
+
+        // Fast path: already a valid hex CLOID
+        if value.starts_with("0x") && value.len() == 34 {
+            return Self::from_hex(value);
+        }
+
+        // Convert arbitrary string to 128-bit hash (two 64-bit FNV-1a halves)
+        // First half uses standard FNV offset, second uses a different seed
+        let bytes = value.as_bytes();
+
+        let mut h1: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+        let mut h2: u64 = 0x6c62_272e_07bb_0142; // Different seed
+        let fnv_prime: u64 = 0x0000_0100_0000_01b3;
+
+        for &b in bytes {
+            h1 ^= u64::from(b);
+            h1 = h1.wrapping_mul(fnv_prime);
+            h2 ^= u64::from(b);
+            h2 = h2.wrapping_mul(fnv_prime.wrapping_add(0x13b));
+        }
+
+        let mut result = [0u8; 16];
+        result[..8].copy_from_slice(&h1.to_be_bytes());
+        result[8..].copy_from_slice(&h2.to_be_bytes());
+
+        Ok(Self(result))
+    }
+
     /// Converts the CLOID to a hex string with `0x` prefix.
     pub fn to_hex(&self) -> String {
         let mut result = String::with_capacity(34);

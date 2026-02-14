@@ -93,6 +93,7 @@ class HyperliquidExecClientConfig(LiveExecClientConfig, frozen=True):
     """
 
     private_key: str | None = None
+    wallet_address: str | None = None
     vault_address: str | None = None
     base_url_http: str | None = None
     base_url_ws: str | None = None

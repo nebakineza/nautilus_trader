@@ -1114,7 +1114,7 @@ impl HyperliquidHttpClient {
 
         // Create cancel action based on which ID we have
         let action = if let Some(cloid) = client_order_id {
-            let cloid_hex = Cloid::from_hex(cloid)
+            let cloid_hex = Cloid::from_client_order_id(cloid)
                 .map_err(|e| Error::bad_request(format!("Invalid client order ID format: {e}")))?;
             let cancel_req = HyperliquidExecCancelByCloidRequest {
                 asset: asset_id,
@@ -1581,7 +1581,7 @@ impl HyperliquidHttpClient {
                 size: size_decimal,
                 reduce_only,
                 kind,
-                cloid: Some(Cloid::from_hex(client_order_id).map_err(|e| {
+                cloid: Some(Cloid::from_client_order_id(client_order_id).map_err(|e| {
                     Error::bad_request(format!("Invalid client order ID format: {e}"))
                 })?),
             };
