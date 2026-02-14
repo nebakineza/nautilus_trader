@@ -165,10 +165,10 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
-      - id: check-logging-macro-usage
-        name: check logging macro usage
-        description: Enforces logging macro conventions
-        entry: .pre-commit-hooks/check_logging_macro_usage.sh
+      - id: check-logging-conventions
+        name: check logging conventions
+        description: Enforces logging conventions
+        entry: .pre-commit-hooks/check_logging_conventions.sh
         language: script
         files: '\.rs$'
         pass_filenames: false
@@ -244,17 +244,16 @@ repos:
         types: [file]
         pass_filenames: false
 
-      # TODO: Disabling for now as too slow
-      # - id: cargo-doc
-      #   name: cargo doc
-      #   description: Check documentation builds without errors or warnings
-      #   entry:
-      #     cargo doc --workspace --features "ffi,python,high-precision,defi"
-      #     --profile nextest --no-deps --quiet
-      #   language: system
-      #   files: '\.(rs|toml)$'
-      #   types: [file]
-      #   pass_filenames: false
+      - id: cargo-doc
+        name: cargo doc
+        description: Check documentation builds without errors or warnings
+        entry:
+          cargo doc --workspace --features "ffi,python,high-precision,defi"
+          --profile nextest --no-deps --quiet
+        language: system
+        files: '\.(rs|toml)$'
+        types: [file]
+        pass_filenames: false
 
   ##############################################################################
   #  Python/Cython formatting and linting
@@ -273,7 +272,7 @@ repos:
         types: [python]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14
+    rev: v0.15.1
     hooks:
       - id: ruff
         name: ruff
@@ -326,7 +325,7 @@ repos:
         ]
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.26 # Must match uv-version file
+    rev: 0.10.2 # Must match uv-version file
     hooks:
       - id: uv-lock
         files: ^python/uv\.lock$

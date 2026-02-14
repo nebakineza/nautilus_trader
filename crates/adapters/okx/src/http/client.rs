@@ -113,6 +113,36 @@ use crate::{
 
 const OKX_SUCCESS_CODE: &str = "0";
 
+fn resolve_okx_error_message(response_body: &[u8], top_level_msg: &str) -> String {
+    let message = top_level_msg.trim();
+    if !message.is_empty() {
+        return message.to_string();
+    }
+
+    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(response_body)
+        && let Some(first_item) = payload
+            .get("data")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|items| items.first())
+    {
+        if let Some(s_msg) = first_item.get("sMsg").and_then(serde_json::Value::as_str) {
+            let s_msg = s_msg.trim();
+            if !s_msg.is_empty() {
+                return s_msg.to_string();
+            }
+        }
+
+        if let Some(s_code) = first_item.get("sCode").and_then(serde_json::Value::as_str) {
+            let s_code = s_code.trim();
+            if !s_code.is_empty() {
+                return s_code.to_string();
+            }
+        }
+    }
+
+    String::new()
+}
+
 /// Default OKX REST API rate limit: 500 requests per 2 seconds.
 ///
 /// - Sub-account order limit: 1000 requests per 2 seconds.
@@ -476,7 +506,7 @@ impl OKXRawHttpClient {
                     if okx_response.code != OKX_SUCCESS_CODE {
                         return Err(OKXHttpError::OkxError {
                             error_code: okx_response.code,
-                            message: okx_response.msg,
+                            message: resolve_okx_error_message(&resp.body, &okx_response.msg),
                         });
                     }
 
@@ -495,7 +525,7 @@ impl OKXRawHttpClient {
                     if let Ok(parsed_error) = serde_json::from_slice::<OKXResponse<T>>(&resp.body) {
                         return Err(OKXHttpError::OkxError {
                             error_code: parsed_error.code,
-                            message: parsed_error.msg,
+                            message: resolve_okx_error_message(&resp.body, &parsed_error.msg),
                         });
                     }
 
@@ -1270,11 +1300,17 @@ impl OKXHttpClient {
     /// # Errors
     ///
     /// Returns an error if the HTTP request fails or instrument parsing fails.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - `Vec<InstrumentAny>`: The parsed instruments
+    /// - `Vec<(Ustr, u64)>`: Mappings of inst_id to inst_id_code for WebSocket order operations
     pub async fn request_instruments(
         &self,
         instrument_type: OKXInstrumentType,
         instrument_family: Option<String>,
-    ) -> anyhow::Result<Vec<InstrumentAny>> {
+    ) -> anyhow::Result<(Vec<InstrumentAny>, Vec<(Ustr, u64)>)> {
         let mut params = GetInstrumentsParamsBuilder::default();
         params.inst_type(instrument_type);
 
@@ -1313,7 +1349,13 @@ impl OKXHttpClient {
         let ts_init = self.generate_ts_init();
 
         let mut instruments: Vec<InstrumentAny> = Vec::new();
+        let mut inst_id_codes: Vec<(Ustr, u64)> = Vec::new();
+
         for inst in &resp {
+            // Collect inst_id_code mappings for WebSocket order operations
+            if let Some(code) = inst.inst_id_code {
+                inst_id_codes.push((inst.inst_id, code));
+            }
             // Skip pre-open instruments which have incomplete/empty field values
             // Keep suspended instruments as they have valid metadata and may return to live
             if inst.state == OKXInstrumentStatus::Preopen {
@@ -1361,7 +1403,7 @@ impl OKXHttpClient {
             }
         }
 
-        Ok(instruments)
+        Ok((instruments, inst_id_codes))
     }
 
     /// Requests a single instrument by `instrument_id` from OKX.
@@ -2972,6 +3014,37 @@ impl OKXHttpClient {
             .ok_or_else(|| OKXHttpError::ValidationError("Empty response".to_string()))
     }
 
+    /// Cancels multiple algo orders via HTTP in a single request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    ///
+    /// # References
+    ///
+    /// <https://www.okx.com/docs-v5/en/#order-book-trading-algo-trading-post-cancel-algo-order>
+    pub async fn cancel_algo_orders(
+        &self,
+        requests: Vec<OKXCancelAlgoOrderRequest>,
+    ) -> Result<Vec<OKXCancelAlgoOrderResponse>, OKXHttpError> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let body =
+            serde_json::to_vec(&requests).map_err(|e| OKXHttpError::JsonError(e.to_string()))?;
+
+        self.inner
+            .send_request::<_, ()>(
+                Method::POST,
+                "/api/v5/trade/cancel-algos",
+                None,
+                Some(body),
+                true,
+            )
+            .await
+    }
+
     /// Places an algo order using domain types.
     ///
     /// This is a convenience method that accepts Nautilus domain types
@@ -3014,6 +3087,7 @@ impl OKXHttpClient {
 
         let request = OKXPlaceAlgoOrderRequest {
             inst_id: instrument_id.symbol.as_str().to_string(),
+            inst_id_code: None,
             td_mode,
             side: okx_side,
             ord_type: OKXAlgoOrderType::Trigger, // All conditional orders use 'trigger' type
@@ -3047,6 +3121,7 @@ impl OKXHttpClient {
     ) -> Result<OKXCancelAlgoOrderResponse, OKXHttpError> {
         let request = OKXCancelAlgoOrderRequest {
             inst_id: instrument_id.symbol.to_string(),
+            inst_id_code: None,
             algo_id: Some(algo_id),
             algo_cl_ord_id: None,
         };

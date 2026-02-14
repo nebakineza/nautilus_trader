@@ -292,7 +292,8 @@ pub fn parse_quantity(value: &str, precision: u8) -> anyhow::Result<Quantity> {
 /// Returns an error if the fee cannot be parsed into `Decimal` or fails internal
 /// validation in [`Money::from_decimal`].
 pub fn parse_fee(value: Option<&str>, currency: Currency) -> anyhow::Result<Money> {
-    // OKX report positive fees with negative signs (i.e., fee charged)
+    // OKX uses opposite sign convention: negative = cost, positive = rebate.
+    // Negate to match Nautilus convention: positive = cost, negative = rebate.
     let decimal = Decimal::from_str(value.unwrap_or("0"))?;
     Money::from_decimal(-decimal, currency)
 }
@@ -2574,6 +2575,36 @@ mod tests {
     }
 
     #[rstest]
+    fn test_parse_inst_id_code_from_swap_instrument() {
+        let json_data = load_test_json("http_get_instruments_swap.json");
+        let response: OKXResponse<OKXInstrument> = serde_json::from_str(&json_data).unwrap();
+
+        // Verify instIdCode is parsed correctly for BTC-USD-SWAP (inverse)
+        let btc_usd_swap = response
+            .data
+            .iter()
+            .find(|i| i.inst_id == "BTC-USD-SWAP")
+            .expect("BTC-USD-SWAP must be in test data");
+        assert_eq!(btc_usd_swap.inst_id_code, Some(10458));
+
+        // Verify instIdCode is parsed correctly for ETH-USDT-SWAP (linear)
+        let eth_usdt_swap = response
+            .data
+            .iter()
+            .find(|i| i.inst_id == "ETH-USDT-SWAP")
+            .expect("ETH-USDT-SWAP must be in test data");
+        assert_eq!(eth_usdt_swap.inst_id_code, Some(10461));
+
+        // Verify instIdCode is parsed correctly for BTC-USDT-SWAP
+        let btc_usdt_swap = response
+            .data
+            .iter()
+            .find(|i| i.inst_id == "BTC-USDT-SWAP")
+            .expect("BTC-USDT-SWAP must be in test data");
+        assert_eq!(btc_usdt_swap.inst_id_code, Some(10459));
+    }
+
+    #[rstest]
     fn test_fee_field_selection_for_contract_types() {
         // Mock OKXFeeRate with different values for crypto vs USDT-margined
         let maker_crypto = "0.0002"; // Crypto-margined maker fee
@@ -3888,6 +3919,7 @@ mod tests {
             max_iceberg_sz: String::new(),
             max_trigger_sz: String::new(),
             max_stop_sz: String::new(),
+            inst_id_code: None,
         };
 
         let result =
@@ -3928,6 +3960,7 @@ mod tests {
             max_iceberg_sz: String::new(),
             max_trigger_sz: String::new(),
             max_stop_sz: String::new(),
+            inst_id_code: None,
         };
 
         let result =
@@ -3968,6 +4001,7 @@ mod tests {
             max_iceberg_sz: String::new(),
             max_trigger_sz: String::new(),
             max_stop_sz: String::new(),
+            inst_id_code: None,
         };
 
         let result =

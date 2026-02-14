@@ -335,8 +335,8 @@ class ParquetDataCatalog(BaseDataCatalog):
         directory = self._make_path(data_cls=data_cls, identifier=identifier)
         self.fs.mkdirs(directory, exist_ok=True)
 
-        start = start if start else data[0].ts_init
-        end = end if end else data[-1].ts_init
+        start = start or data[0].ts_init
+        end = end or data[-1].ts_init
         filename = _timestamps_to_filename(start, end)
         parquet_file = f"{directory}/{filename}"
 
@@ -726,6 +726,8 @@ class ParquetDataCatalog(BaseDataCatalog):
             pq.read_table(file, memory_map=True, pre_buffer=False, filesystem=self.fs)
             for file in file_list
         ]
+        self._validate_table_metadata(tables, file_list)
+
         combined_table = pa.concat_tables(tables)
 
         if deduplicate:
@@ -736,6 +738,45 @@ class ParquetDataCatalog(BaseDataCatalog):
         for file in file_list:
             if file != new_file:
                 self.fs.rm(file)
+
+    @staticmethod
+    def _validate_table_metadata(
+        tables: list[pa.Table],
+        file_list: list[str],
+    ) -> None:
+        if len(tables) <= 1:
+            return
+
+        reference_metadata = tables[0].schema.metadata or {}
+        reference_keys = set(reference_metadata.keys())
+
+        for i, table in enumerate(tables[1:], start=1):
+            metadata = table.schema.metadata or {}
+            metadata_keys = set(metadata.keys())
+
+            missing = reference_keys - metadata_keys
+            if missing:
+                raise ValueError(
+                    f"Cannot consolidate parquet files with mismatched metadata: "
+                    f"keys {missing!r} present in '{file_list[0]}' "
+                    f"but missing from '{file_list[i]}'",
+                )
+
+            extra = metadata_keys - reference_keys
+            if extra:
+                raise ValueError(
+                    f"Cannot consolidate parquet files with mismatched metadata: "
+                    f"keys {extra!r} present in '{file_list[i]}' "
+                    f"but missing from '{file_list[0]}'",
+                )
+
+            for key in reference_keys:
+                if reference_metadata[key] != metadata[key]:
+                    raise ValueError(
+                        f"Cannot consolidate parquet files with conflicting metadata: "
+                        f"key {key!r} has value {reference_metadata[key]!r} in "
+                        f"'{file_list[0]}' but {metadata[key]!r} in '{file_list[i]}'",
+                    )
 
     @staticmethod
     def _deduplicate_table(table: pa.Table) -> pa.Table:
@@ -1624,14 +1665,13 @@ class ParquetDataCatalog(BaseDataCatalog):
             start=start,
             end=end,
             where=where,
-            file=files,
+            files=files,
             **kwargs,
         )
         result = session.to_query_result()
 
         # Gather data
         data = []
-
         for chunk in result:
             data.extend(capsule_to_list(chunk))
 
@@ -1651,7 +1691,7 @@ class ParquetDataCatalog(BaseDataCatalog):
         where: str | None = None,
         session: DataBackendSession | None = None,
         files: list[str] | None = None,
-        optimize_file_loading: bool = True,
+        optimize_file_loading: bool = False,
         **kwargs: Any,
     ) -> DataBackendSession:
         """
@@ -1680,8 +1720,8 @@ class ParquetDataCatalog(BaseDataCatalog):
             performance optimization when the caller already knows which files exist.
             Note: With `optimize_file_loading=True`, the entire directory containing
             these files will be read by DataFusion, not just the specified files.
-        optimize_file_loading : bool, default True
-            If True (default), registers entire directories with DataFusion, which is
+        optimize_file_loading : bool, default False
+            If True, registers entire directories with DataFusion, which is
             more efficient for managing many files. If False, registers each file
             individually (needed for operations like consolidation where precise file
             control is required).
@@ -1944,7 +1984,7 @@ class ParquetDataCatalog(BaseDataCatalog):
         **kwargs: Any,
     ) -> list[Data]:
         # Load dataset - use provided files or query for them
-        file_list = files if files else self._query_files(data_cls, identifiers, start, end)
+        file_list = files or self._query_files(data_cls, identifiers, start, end)
 
         if not file_list:
             return []

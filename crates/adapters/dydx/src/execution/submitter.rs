@@ -40,8 +40,7 @@ use crate::{
         broadcaster::TxBroadcaster,
         order_builder::OrderMessageBuilder,
         tx_manager::TransactionManager,
-        types::{ConditionalOrderType, LimitOrderParams},
-        wallet::Wallet,
+        types::{ConditionalOrderType, LimitOrderParams, OrderLifetime},
     },
     grpc::{DydxGrpcClient, types::ChainId},
     http::client::DydxHttpClient,
@@ -90,13 +89,11 @@ impl OrderSubmitter {
     /// * `wallet_address` - Main account address (may differ from derived address for permissioned keys)
     /// * `subaccount_number` - dYdX subaccount number (typically 0)
     /// * `chain_id` - dYdX chain ID
-    /// * `authenticator_ids` - Authenticator IDs for permissioned key trading
     /// * `block_time_monitor` - Block time monitor (provides current height and dynamic block time)
     ///
     /// # Errors
     ///
     /// Returns error if wallet creation from private key fails.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         grpc_client: DydxGrpcClient,
         http_client: DydxHttpClient,
@@ -104,25 +101,15 @@ impl OrderSubmitter {
         wallet_address: String,
         subaccount_number: u32,
         chain_id: ChainId,
-        authenticator_ids: Vec<u64>,
         block_time_monitor: Arc<BlockTimeMonitor>,
     ) -> Result<Self, DydxError> {
-        // Create wallet from private key
-        let wallet = Wallet::from_private_key(private_key)
-            .map_err(|e| DydxError::Wallet(format!("Failed to create wallet: {e}")))?;
-
-        // Create shared sequence counter (initialized from chain on first use)
-        let sequence_number = Arc::new(std::sync::atomic::AtomicU64::new(0));
-
-        // Create components
+        // Create transaction manager (owns wallet and sequence management)
         let tx_manager = Arc::new(TransactionManager::new(
             grpc_client.clone(),
-            wallet,
+            private_key,
             wallet_address.clone(),
             chain_id,
-            authenticator_ids,
-            sequence_number,
-        ));
+        )?);
 
         let broadcaster = Arc::new(TxBroadcaster::new(grpc_client));
 
@@ -204,11 +191,12 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         side: OrderSide,
         quantity: Quantity,
     ) -> Result<String, DydxError> {
         log::info!(
-            "Submitting market order: client_id={client_order_id}, side={side:?}, quantity={quantity}"
+            "Submitting market order: client_id={client_order_id}, meta={client_metadata:#x}, side={side:?}, quantity={quantity}"
         );
 
         let block_height = self.current_block_height();
@@ -217,16 +205,17 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_market_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             side,
             quantity,
             block_height,
         )?;
 
-        // Broadcast with retry
+        // Market orders are always short-term — use cached sequence (no increment)
         let operation = format!("Submit market order {client_order_id}");
         let tx_hash = self
             .broadcaster
-            .broadcast_with_retry(&self.tx_manager, vec![msg], &operation)
+            .broadcast_short_term(&self.tx_manager, vec![msg], &operation)
             .await?;
 
         Ok(tx_hash)
@@ -249,6 +238,7 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         side: OrderSide,
         price: Price,
         quantity: Quantity,
@@ -258,7 +248,7 @@ impl OrderSubmitter {
         expire_time: Option<i64>,
     ) -> Result<String, DydxError> {
         log::info!(
-            "Submitting limit order: client_id={client_order_id}, side={side:?}, price={price}, \
+            "Submitting limit order: client_id={client_order_id}, meta={client_metadata:#x}, side={side:?}, price={price}, \
              quantity={quantity}, tif={time_in_force:?}, post_only={post_only}, reduce_only={reduce_only}"
         );
 
@@ -268,6 +258,7 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_limit_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             side,
             price,
             quantity,
@@ -278,12 +269,26 @@ impl OrderSubmitter {
             expire_time,
         )?;
 
-        // Broadcast with retry
+        // Determine if short-term based on time_in_force and expire_time
+        let is_short_term = OrderLifetime::from_time_in_force(
+            time_in_force,
+            expire_time,
+            false,
+            self.order_builder.max_short_term_secs(),
+        )
+        .is_short_term();
+
+        // Short-term: cached sequence, no retry. Stateful: proper sequence management.
         let operation = format!("Submit limit order {client_order_id}");
-        let tx_hash = self
-            .broadcaster
-            .broadcast_with_retry(&self.tx_manager, vec![msg], &operation)
-            .await?;
+        let tx_hash = if is_short_term {
+            self.broadcaster
+                .broadcast_short_term(&self.tx_manager, vec![msg], &operation)
+                .await?
+        } else {
+            self.broadcaster
+                .broadcast_with_retry(&self.tx_manager, vec![msg], &operation)
+                .await?
+        };
 
         Ok(tx_hash)
     }
@@ -319,9 +324,11 @@ impl OrderSubmitter {
             .any(|params| self.order_builder.is_short_term_order(params));
 
         if has_short_term {
-            // Short-term orders must be submitted individually
-            log::info!(
-                "Submitting {} limit orders individually (short-term orders cannot be batched)",
+            // Short-term orders must be submitted individually.
+            // They don't consume Cosmos SDK sequences (GTB replay protection),
+            // so we use broadcast_short_term for concurrent submission.
+            log::debug!(
+                "Submitting {} short-term limit orders concurrently (sequence not consumed)",
                 orders.len()
             );
 
@@ -335,9 +342,9 @@ impl OrderSubmitter {
 
                 let handle = get_runtime().spawn(async move {
                     let msg = order_builder.build_limit_order_from_params(&params, block_height)?;
-                    let operation = format!("Submit limit order {}", params.client_order_id);
+                    let operation = format!("Submit short-term order {}", params.client_order_id);
                     broadcaster
-                        .broadcast_with_retry(&tx_manager, vec![msg], &operation)
+                        .broadcast_short_term(&tx_manager, vec![msg], &operation)
                         .await
                 });
 
@@ -408,12 +415,22 @@ impl OrderSubmitter {
             block_height,
         )?;
 
-        // Broadcast with retry
+        // Determine if this is a short-term cancel
+        let is_short_term = self
+            .order_builder
+            .is_short_term_cancel(time_in_force, expire_time_ns);
+
+        // Short-term: cached sequence, no retry. Stateful: proper sequence management.
         let operation = format!("Cancel order {client_order_id}");
-        let tx_hash = self
-            .broadcaster
-            .broadcast_with_retry(&self.tx_manager, vec![msg], &operation)
-            .await?;
+        let tx_hash = if is_short_term {
+            self.broadcaster
+                .broadcast_short_term(&self.tx_manager, vec![msg], &operation)
+                .await?
+        } else {
+            self.broadcaster
+                .broadcast_with_retry(&self.tx_manager, vec![msg], &operation)
+                .await?
+        };
 
         Ok(tx_hash)
     }
@@ -468,66 +485,6 @@ impl OrderSubmitter {
         Ok(tx_hash)
     }
 
-    /// Modifies an order via cancel-and-replace.
-    ///
-    /// dYdX doesn't support native order modification. This method atomically
-    /// cancels the old order and places a new one in a single transaction.
-    ///
-    /// # Arguments
-    ///
-    /// * `instrument_id` - The instrument for both cancel and new order
-    /// * `old_client_order_id` - Client ID of the order to cancel
-    /// * `new_client_order_id` - Client ID for the replacement order
-    /// * `old_time_in_force` - TimeInForce of the original order (for cancel routing)
-    /// * `old_expire_time_ns` - Expire time of the original order (for cancel routing)
-    /// * `new_params` - Parameters for the replacement limit order
-    ///
-    /// # Returns
-    ///
-    /// The transaction hash on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DydxError` if transaction broadcast fails.
-    pub async fn modify_order(
-        &self,
-        instrument_id: InstrumentId,
-        old_client_order_id: u32,
-        new_client_order_id: u32,
-        old_time_in_force: TimeInForce,
-        old_expire_time_ns: Option<nautilus_core::UnixNanos>,
-        new_params: &LimitOrderParams,
-    ) -> Result<String, DydxError> {
-        log::info!(
-            "Modifying order via cancel-and-replace: old_id={old_client_order_id}, \
-             new_id={new_client_order_id}, price={}, qty={}",
-            new_params.price,
-            new_params.quantity
-        );
-
-        let block_height = self.current_block_height();
-
-        // Build atomic cancel + replace batch
-        let msgs = self.order_builder.build_cancel_and_replace(
-            instrument_id,
-            old_client_order_id,
-            new_client_order_id,
-            old_time_in_force,
-            old_expire_time_ns,
-            new_params,
-            block_height,
-        )?;
-
-        // Broadcast as single transaction
-        let operation = format!("Modify order {old_client_order_id} -> {new_client_order_id}");
-        let tx_hash = self
-            .broadcaster
-            .broadcast_with_retry(&self.tx_manager, msgs, &operation)
-            .await?;
-
-        Ok(tx_hash)
-    }
-
     /// Submits a stop market order to dYdX via gRPC.
     ///
     /// Stop market orders are triggered when the price reaches `trigger_price`.
@@ -544,6 +501,7 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         side: OrderSide,
         trigger_price: Price,
         quantity: Quantity,
@@ -551,7 +509,7 @@ impl OrderSubmitter {
         expire_time: Option<i64>,
     ) -> Result<String, DydxError> {
         log::info!(
-            "Submitting stop market order: client_id={client_order_id}, side={side:?}, \
+            "Submitting stop market order: client_id={client_order_id}, meta={client_metadata:#x}, side={side:?}, \
              trigger={trigger_price}, qty={quantity}"
         );
 
@@ -559,6 +517,7 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_stop_market_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             side,
             trigger_price,
             quantity,
@@ -593,6 +552,7 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         side: OrderSide,
         trigger_price: Price,
         limit_price: Price,
@@ -603,7 +563,7 @@ impl OrderSubmitter {
         expire_time: Option<i64>,
     ) -> Result<String, DydxError> {
         log::info!(
-            "Submitting stop limit order: client_id={client_order_id}, side={side:?}, \
+            "Submitting stop limit order: client_id={client_order_id}, meta={client_metadata:#x}, side={side:?}, \
              trigger={trigger_price}, limit={limit_price}, qty={quantity}"
         );
 
@@ -611,6 +571,7 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_stop_limit_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             side,
             trigger_price,
             limit_price,
@@ -648,6 +609,7 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         side: OrderSide,
         trigger_price: Price,
         quantity: Quantity,
@@ -655,7 +617,7 @@ impl OrderSubmitter {
         expire_time: Option<i64>,
     ) -> Result<String, DydxError> {
         log::info!(
-            "Submitting take profit market order: client_id={client_order_id}, side={side:?}, \
+            "Submitting take profit market order: client_id={client_order_id}, meta={client_metadata:#x}, side={side:?}, \
              trigger={trigger_price}, qty={quantity}"
         );
 
@@ -663,6 +625,7 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_take_profit_market_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             side,
             trigger_price,
             quantity,
@@ -697,6 +660,7 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         side: OrderSide,
         trigger_price: Price,
         limit_price: Price,
@@ -707,7 +671,7 @@ impl OrderSubmitter {
         expire_time: Option<i64>,
     ) -> Result<String, DydxError> {
         log::info!(
-            "Submitting take profit limit order: client_id={client_order_id}, side={side:?}, \
+            "Submitting take profit limit order: client_id={client_order_id}, meta={client_metadata:#x}, side={side:?}, \
              trigger={trigger_price}, limit={limit_price}, qty={quantity}"
         );
 
@@ -715,6 +679,7 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_take_profit_limit_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             side,
             trigger_price,
             limit_price,
@@ -752,6 +717,7 @@ impl OrderSubmitter {
         &self,
         instrument_id: InstrumentId,
         client_order_id: u32,
+        client_metadata: u32,
         order_type: ConditionalOrderType,
         side: OrderSide,
         trigger_price: Price,
@@ -766,6 +732,7 @@ impl OrderSubmitter {
         let msg = self.order_builder.build_conditional_order(
             instrument_id,
             client_order_id,
+            client_metadata,
             order_type,
             side,
             trigger_price,

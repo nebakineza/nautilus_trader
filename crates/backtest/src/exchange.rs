@@ -15,10 +15,6 @@
 
 //! Provides a `SimulatedExchange` venue for backtesting on historical data.
 
-// Under development
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
 use std::{
     cell::RefCell,
     collections::{BinaryHeap, VecDeque},
@@ -37,18 +33,19 @@ use nautilus_core::{
 use nautilus_execution::{
     matching_core::OrderMatchInfo,
     matching_engine::{config::OrderMatchingEngineConfig, engine::OrderMatchingEngine},
-    models::{fee::FeeModelAny, fill::FillModel, latency::LatencyModel},
+    models::{fee::FeeModelAny, fill::FillModelAny, latency::LatencyModel},
 };
 use nautilus_model::{
     accounts::AccountAny,
     data::{
-        Bar, Data, InstrumentStatus, OrderBookDelta, OrderBookDeltas, OrderBookDeltas_API,
-        QuoteTick, TradeTick,
+        Bar, Data, InstrumentClose, InstrumentStatus, OrderBookDelta, OrderBookDeltas,
+        OrderBookDeltas_API, OrderBookDepth10, QuoteTick, TradeTick,
     },
     enums::{AccountType, BookType, OmsType},
     identifiers::{InstrumentId, Venue},
     instruments::{Instrument, InstrumentAny},
     orderbook::OrderBook,
+    orders::OrderAny,
     types::{AccountBalance, Currency, Money, Price},
 };
 use rust_decimal::Decimal;
@@ -116,7 +113,7 @@ pub struct SimulatedExchange {
     exec_client: Option<Rc<dyn ExecutionClient>>,
     pub base_currency: Option<Currency>,
     fee_model: FeeModelAny,
-    fill_model: FillModel,
+    fill_model: FillModelAny,
     latency_model: Option<Box<dyn LatencyModel>>,
     instruments: AHashMap<InstrumentId, InstrumentAny>,
     matching_engines: AHashMap<InstrumentId, OrderMatchingEngine>,
@@ -128,6 +125,7 @@ pub struct SimulatedExchange {
     inflight_queue: BinaryHeap<InflightCommand>,
     inflight_counter: AHashMap<UnixNanos, u32>,
     bar_execution: bool,
+    bar_adaptive_high_low_ordering: bool,
     trade_execution: bool,
     liquidity_consumption: bool,
     reject_stop_orders: bool,
@@ -138,7 +136,7 @@ pub struct SimulatedExchange {
     use_reduce_only: bool,
     use_message_queue: bool,
     use_market_order_acks: bool,
-    allow_cash_borrowing: bool,
+    _allow_cash_borrowing: bool,
     frozen_account: bool,
     price_protection_points: u32,
 }
@@ -172,11 +170,12 @@ impl SimulatedExchange {
         modules: Vec<Box<dyn SimulationModule>>,
         cache: Rc<RefCell<Cache>>,
         clock: Rc<RefCell<dyn Clock>>,
-        fill_model: FillModel,
+        fill_model: FillModelAny,
         fee_model: FeeModelAny,
         book_type: BookType,
         latency_model: Option<Box<dyn LatencyModel>>,
         bar_execution: Option<bool>,
+        bar_adaptive_high_low_ordering: Option<bool>,
         trade_execution: Option<bool>,
         liquidity_consumption: Option<bool>,
         reject_stop_orders: Option<bool>,
@@ -220,6 +219,7 @@ impl SimulatedExchange {
             inflight_queue: BinaryHeap::new(),
             inflight_counter: AHashMap::new(),
             bar_execution: bar_execution.unwrap_or(true),
+            bar_adaptive_high_low_ordering: bar_adaptive_high_low_ordering.unwrap_or(false),
             trade_execution: trade_execution.unwrap_or(true),
             liquidity_consumption: liquidity_consumption.unwrap_or(true),
             reject_stop_orders: reject_stop_orders.unwrap_or(true),
@@ -230,7 +230,7 @@ impl SimulatedExchange {
             use_reduce_only: use_reduce_only.unwrap_or(true),
             use_message_queue: use_message_queue.unwrap_or(true),
             use_market_order_acks: use_market_order_acks.unwrap_or(false),
-            allow_cash_borrowing: allow_cash_borrowing.unwrap_or(false),
+            _allow_cash_borrowing: allow_cash_borrowing.unwrap_or(false),
             frozen_account: frozen_account.unwrap_or(false),
             price_protection_points: price_protection_points.unwrap_or(0),
         })
@@ -240,7 +240,7 @@ impl SimulatedExchange {
         self.exec_client = Some(client);
     }
 
-    pub fn set_fill_model(&mut self, fill_model: FillModel) {
+    pub fn set_fill_model(&mut self, fill_model: FillModelAny) {
         for matching_engine in self.matching_engines.values_mut() {
             matching_engine.set_fill_model(fill_model.clone());
             log::info!(
@@ -295,6 +295,7 @@ impl SimulatedExchange {
 
         let matching_engine_config = OrderMatchingEngineConfig::new(
             self.bar_execution,
+            self.bar_adaptive_high_low_ordering,
             self.trade_execution,
             self.liquidity_consumption,
             self.reject_stop_orders,
@@ -479,6 +480,16 @@ impl SimulatedExchange {
         }
     }
 
+    #[must_use]
+    pub fn has_pending_commands(&self, ts_now: UnixNanos) -> bool {
+        if !self.message_queue.is_empty() {
+            return true;
+        }
+        self.inflight_queue
+            .peek()
+            .is_some_and(|inflight| inflight.timestamp <= ts_now)
+    }
+
     pub fn send(&mut self, command: TradingCommand) {
         if !self.use_message_queue {
             self.process_trading_command(command);
@@ -580,6 +591,37 @@ impl SimulatedExchange {
 
         if let Some(matching_engine) = self.matching_engines.get_mut(&deltas.instrument_id) {
             matching_engine.process_order_book_deltas(&deltas).unwrap();
+        } else {
+            panic!("Matching engine should be initialized");
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if adding a missing instrument during depth10 processing fails.
+    pub fn process_order_book_depth10(&mut self, depth: &OrderBookDepth10) {
+        for module in &self.modules {
+            module.pre_process(Data::Depth10(Box::new(*depth)));
+        }
+
+        if !self.matching_engines.contains_key(&depth.instrument_id) {
+            let instrument = {
+                let cache = self.cache.as_ref().borrow();
+                cache.instrument(&depth.instrument_id).cloned()
+            };
+
+            if let Some(instrument) = instrument {
+                self.add_instrument(instrument).unwrap();
+            } else {
+                panic!(
+                    "No matching engine found for instrument {}",
+                    depth.instrument_id
+                );
+            }
+        }
+
+        if let Some(matching_engine) = self.matching_engines.get_mut(&depth.instrument_id) {
+            matching_engine.process_order_book_depth10(depth).unwrap();
         } else {
             panic!("Matching engine should be initialized");
         }
@@ -709,6 +751,37 @@ impl SimulatedExchange {
 
     /// # Panics
     ///
+    /// Panics if adding a missing instrument during instrument close processing fails.
+    pub fn process_instrument_close(&mut self, close: InstrumentClose) {
+        for module in &self.modules {
+            module.pre_process(Data::InstrumentClose(close));
+        }
+
+        if !self.matching_engines.contains_key(&close.instrument_id) {
+            let instrument = {
+                let cache = self.cache.as_ref().borrow();
+                cache.instrument(&close.instrument_id).cloned()
+            };
+
+            if let Some(instrument) = instrument {
+                self.add_instrument(instrument).unwrap();
+            } else {
+                panic!(
+                    "No matching engine found for instrument {}",
+                    close.instrument_id
+                );
+            }
+        }
+
+        if let Some(matching_engine) = self.matching_engines.get_mut(&close.instrument_id) {
+            matching_engine.process_instrument_close(close);
+        } else {
+            panic!("Matching engine should be initialized");
+        }
+    }
+
+    /// # Panics
+    ///
     /// Panics if popping an inflight command fails during processing.
     pub fn process(&mut self, ts_now: UnixNanos) {
         // TODO implement correct clock fixed time setting self.clock.set_time(ts_now);
@@ -741,7 +814,9 @@ impl SimulatedExchange {
             matching_engine.reset();
         }
 
-        // TODO Clear the inflight and message queues
+        self.message_queue.clear();
+        self.inflight_queue.clear();
+
         log::info!("Resetting exchange state");
     }
 
@@ -777,8 +852,13 @@ impl SimulatedExchange {
                 TradingCommand::BatchCancelOrders(ref command) => {
                     matching_engine.process_batch_cancel(command, account_id);
                 }
-                TradingCommand::SubmitOrderList(mut command) => {
-                    for order in &mut command.order_list.orders {
+                TradingCommand::SubmitOrderList(ref command) => {
+                    let mut orders: Vec<OrderAny> = self
+                        .cache
+                        .borrow()
+                        .orders_for_ids(&command.order_list.client_order_ids, command);
+
+                    for order in &mut orders {
                         matching_engine.process_order(order, account_id);
                     }
                 }
@@ -834,7 +914,7 @@ mod tests {
     use nautilus_core::{UUID4, UnixNanos};
     use nautilus_execution::models::{
         fee::{FeeModelAny, MakerTakerFeeModel},
-        fill::FillModel,
+        fill::FillModelAny,
         latency::StaticLatencyModel,
     };
     use nautilus_model::{
@@ -883,11 +963,12 @@ mod tests {
                 vec![],
                 cache.clone(),
                 clock,
-                FillModel::default(),
+                FillModelAny::default(),
                 FeeModelAny::MakerTaker(MakerTakerFeeModel),
                 book_type,
                 None, // latency_model
                 None, // bar_execution
+                None, // bar_adaptive_high_low_ordering
                 None, // trade_execution
                 None, // liquidity_consumption
                 None, // reject_stop_orders
@@ -1524,6 +1605,71 @@ mod tests {
                 .unwrap()
                 .timestamp,
             UnixNanos::from(450)
+        );
+    }
+
+    #[rstest]
+    fn test_process_iterates_matching_engines_after_commands(
+        crypto_perpetual_ethusdt: CryptoPerpetual,
+    ) {
+        let cache = Rc::new(RefCell::new(Cache::default()));
+        let exchange = get_exchange(
+            Venue::new("BINANCE"),
+            AccountType::Margin,
+            BookType::L1_MBP,
+            Some(cache.clone()),
+        );
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument_id = crypto_perpetual_ethusdt.id;
+        exchange.borrow_mut().add_instrument(instrument).unwrap();
+
+        let quote = QuoteTick::new(
+            instrument_id,
+            Price::from("1000.00"),
+            Price::from("1001.00"),
+            Quantity::from("1.000"),
+            Quantity::from("1.000"),
+            UnixNanos::from(1),
+            UnixNanos::from(1),
+        );
+        exchange.borrow_mut().process_quote_tick(&quote);
+
+        // Create a passive buy limit below the ask (should NOT fill)
+        let order = OrderTestBuilder::new(OrderType::Limit)
+            .instrument_id(instrument_id)
+            .client_order_id(ClientOrderId::new("O-LIMIT-1"))
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from("1.000"))
+            .price(Price::from("999.00"))
+            .build();
+
+        cache
+            .borrow_mut()
+            .add_order(order.clone(), None, None, false)
+            .unwrap();
+
+        let command = TradingCommand::SubmitOrder(SubmitOrder::new(
+            TraderId::test_default(),
+            None,
+            StrategyId::test_default(),
+            instrument_id,
+            order.client_order_id(),
+            order.init_event().clone(),
+            None,
+            None,
+            None,
+            UUID4::default(),
+            UnixNanos::from(1),
+        ));
+        exchange.borrow_mut().send(command);
+
+        exchange.borrow_mut().process(UnixNanos::from(1));
+
+        let open_orders = exchange.borrow().get_open_orders(Some(instrument_id));
+        assert_eq!(open_orders.len(), 1);
+        assert_eq!(
+            open_orders[0].client_order_id,
+            ClientOrderId::new("O-LIMIT-1")
         );
     }
 }

@@ -27,7 +27,7 @@ use pyo3::{conversion::IntoPyObjectExt, prelude::*, types::PyList};
 use crate::http::{
     client::DeribitHttpClient,
     error::DeribitHttpError,
-    models::{DeribitCurrency, DeribitInstrumentKind},
+    models::{DeribitCurrency, DeribitProductType},
 };
 
 #[pymethods]
@@ -111,18 +111,18 @@ impl DeribitHttpClient {
     }
 
     #[pyo3(name = "request_instruments")]
-    #[pyo3(signature = (currency, kind=None))]
+    #[pyo3(signature = (currency, product_type=None))]
     fn py_request_instruments<'py>(
         &self,
         py: Python<'py>,
         currency: DeribitCurrency,
-        kind: Option<DeribitInstrumentKind>,
+        product_type: Option<DeribitProductType>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.clone();
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let instruments = client
-                .request_instruments(currency, kind)
+                .request_instruments(currency, product_type)
                 .await
                 .map_err(to_pyvalue_err)?;
 

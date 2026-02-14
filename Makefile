@@ -115,22 +115,22 @@ RESET  := \033[0m
 
 #== Installation
 
+.PHONY: install-deps
+install-deps:  #-- Install Python dependencies only (no package build)
+	$(info $(M) Installing Python dependencies...)
+	$Q uv sync --active --all-groups --all-extras --no-install-package nautilus_trader
+
 .PHONY: install
 install: export BUILD_MODE=release
 install:  #-- Install in release mode with all dependencies and extras
-	$(info $(M) Installing NautilusTrader in release mode with all dependencies and extras...)
-	$Q uv sync --active --all-groups --all-extras --verbose
+	$(info $(M) Installing NautilusTrader in release mode...)
+	$Q uv sync --active --all-groups --all-extras --inexact
 
 .PHONY: install-debug
 install-debug: export BUILD_MODE=debug
 install-debug:  #-- Install in debug mode for development
-	$(info $(M) Installing NautilusTrader in debug mode for development...)
-	$Q uv sync --active --all-groups --all-extras --verbose
-
-.PHONY: install-just-deps
-install-just-deps:  #-- Install dependencies only without building the package
-	$(info $(M) Installing dependencies only without building the package...)
-	$Q uv sync --active --all-groups --all-extras --no-install-package nautilus_trader
+	$(info $(M) Installing NautilusTrader in debug mode...)
+	$Q uv sync --active --all-groups --all-extras --inexact
 
 #== Build
 

@@ -79,6 +79,11 @@ impl StrategyConfig {
         external_order_claims=None,
         manage_contingent_orders=false,
         manage_gtd_expiry=false,
+        manage_stop=false,
+        market_exit_interval_ms=100,
+        market_exit_max_attempts=100,
+        market_exit_time_in_force=TimeInForce::Gtc,
+        market_exit_reduce_only=true,
         use_uuid_client_order_ids=false,
         use_hyphens_in_client_order_ids=true,
         log_events=true,
@@ -93,6 +98,11 @@ impl StrategyConfig {
         external_order_claims: Option<Vec<InstrumentId>>,
         manage_contingent_orders: bool,
         manage_gtd_expiry: bool,
+        manage_stop: bool,
+        market_exit_interval_ms: u64,
+        market_exit_max_attempts: u64,
+        market_exit_time_in_force: TimeInForce,
+        market_exit_reduce_only: bool,
         use_uuid_client_order_ids: bool,
         use_hyphens_in_client_order_ids: bool,
         log_events: bool,
@@ -108,6 +118,11 @@ impl StrategyConfig {
             external_order_claims,
             manage_contingent_orders,
             manage_gtd_expiry,
+            manage_stop,
+            market_exit_interval_ms,
+            market_exit_max_attempts,
+            market_exit_time_in_force,
+            market_exit_reduce_only,
             log_events,
             log_commands,
             log_rejected_due_post_only_as_warning,
@@ -518,17 +533,21 @@ impl Deref for PyStrategyInner {
     type Target = DataActorCore;
 
     fn deref(&self) -> &Self::Target {
-        &self.core.actor
+        &self.core
     }
 }
 
 impl DerefMut for PyStrategyInner {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.core.actor
+        &mut self.core
     }
 }
 
 impl Strategy for PyStrategyInner {
+    fn core(&self) -> &StrategyCore {
+        &self.core
+    }
+
     fn core_mut(&mut self) -> &mut StrategyCore {
         &mut self.core
     }

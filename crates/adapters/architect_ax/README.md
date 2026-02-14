@@ -37,14 +37,14 @@ This crate provides feature flags to control source code inclusion during compil
 ## Documentation
 
 - [Crate docs](https://docs.rs/nautilus-architect-ax)
-- [API reference](https://docs.sandbox.x.architect.co/api-reference/)
+- [API reference](https://docs.architect.exchange/api-reference/)
 - [AX Exchange](https://architect.exchange/)
 
 ## Authentication
 
 AX Exchange uses bearer token authentication via HTTP headers:
 
-1. API key and secret (with optional TOTP) obtain a session token via `/authenticate`.
+1. API key and secret obtain a session token via `/authenticate`.
 2. The session token is used as a bearer token for subsequent REST and WebSocket requests.
 
 ## API endpoints

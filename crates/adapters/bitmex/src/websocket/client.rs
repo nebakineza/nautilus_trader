@@ -272,6 +272,9 @@ impl BitmexWebSocketClient {
     pub async fn connect(&mut self) -> Result<(), BitmexWsError> {
         let (client, raw_rx) = self.connect_inner().await?;
 
+        // Reset shutdown signal so is_active() works after close+reconnect
+        self.signal.store(false, Ordering::Relaxed);
+
         // Replace connection state so all clones see the underlying WebSocketClient's state
         self.connection_mode.store(client.connection_mode_atomic());
 
@@ -433,9 +436,10 @@ impl BitmexWebSocketClient {
                             resubscribe_all();
                         }
 
-                        // TODO: Implement proper Reconnected event forwarding to consumers.
-                        // Currently intercepted for internal housekeeping only. Will add new
-                        // message type from WebSocketClient to notify consumers of reconnections.
+                        if handler.send(NautilusWsMessage::Reconnected).is_err() {
+                            log::error!("Failed to forward reconnect event (receiver dropped)");
+                            break;
+                        }
 
                         continue;
                     }
@@ -471,6 +475,10 @@ impl BitmexWebSocketClient {
         if self.credential.is_some()
             && let Err(e) = self.authenticate().await
         {
+            if let Some(handle) = self.task_handle.take() {
+                handle.abort();
+            }
+            self.signal.store(true, Ordering::Relaxed);
             return Err(e);
         }
 
