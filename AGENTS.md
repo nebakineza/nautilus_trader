@@ -308,6 +308,18 @@ ssh sentinel-vps 'journalctl -u "vip_*_v8.service" --since "1 hour ago" | grep "
 
 ---
 
+## Hyperliquid Account Structure
+
+**CRITICAL: Unified Trading is ENABLED.**
+- Spot and Perps share ONE margin pool. There is NO separate spot/perp balance.
+- There is NO transfer between spot and perps — transfers are disabled in Unified Trading mode.
+- When you fund the HL wallet (deposit USDC from L1/bridge), it goes into the unified account.
+- `equity` from the API = total account value (spot + perps + unrealized P&L).
+- The strategy's auto-scale queries this single unified equity number.
+- **NEVER suggest transferring between spot and perps. It does not exist.**
+
+---
+
 ## Security & Secrets
 
 **NEVER commit:**
