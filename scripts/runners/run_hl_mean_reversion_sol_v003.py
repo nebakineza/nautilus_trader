@@ -8,6 +8,10 @@ Results (60-day backtest, $150 position size):
     OPTIMAL: 80.0% WR | 70 trades (56W/14L) | $+16.39 P&L | $0.23/trade | 1.2/day
     SAFE:    78.3% WR | 69 trades (54W/15L) | $+9.89  P&L | $0.14/trade | 1.2/day
 
+NOTE: Backtest used $150 for controlled comparison. Live sizing should
+    match your capital. With $2400 USDC and --auto-scale (default ON),
+    the strategy auto-computes sizes from equity × leverage.
+
 Key differences from v003 baseline (78% WR, 59t, $12.12 on 60d):
     BB=26 (vs 32)       → slightly faster mean, better for SOL's volatility
     exit_band=1.5σ      → wider exit lets SOL winners run further
@@ -29,13 +33,19 @@ SNIPER MODE (--sniper):
 USAGE:
     # Set your wallet private key (or use .env with EnvironmentFile in systemd)
     export HYPERLIQUID_MAINNET_PK=0x...
+    export HYPERLIQUID_WALLET=0x...
+
+    # Default: auto-scale ON, 3x leverage (sizes from your HL equity)
     .venv/bin/python scripts/runners/run_hl_mean_reversion_sol_v003.py
 
-    # Paper trade first (smaller size):
-    .venv/bin/python scripts/runners/run_hl_mean_reversion_sol_v003.py --size 50
+    # Disable auto-scale, use fixed sizing:
+    .venv/bin/python scripts/runners/run_hl_mean_reversion_sol_v003.py --no-auto-scale --size 1200 --max-size 1800
 
     # Conservative mode (78.3% WR, slightly tighter filters):
     .venv/bin/python scripts/runners/run_hl_mean_reversion_sol_v003.py --safe
+
+    # Higher leverage (careful — wider risk):
+    .venv/bin/python scripts/runners/run_hl_mean_reversion_sol_v003.py --leverage 5
 
     # Add 1h sniper alongside the 5m workhorse (both in one process):
     .venv/bin/python scripts/runners/run_hl_mean_reversion_sol_v003.py --sniper
@@ -161,20 +171,22 @@ def parse_args():
                    help="Bar interval (default: 5m)")
 
     # Position sizing
-    p.add_argument("--size", type=float, default=150.0,
-                   help="Total position budget in USD (default: 150, ignored if --auto-scale)")
-    p.add_argument("--max-size", type=float, default=200.0,
-                   help="Max position cap in USD (default: 200, ignored if --auto-scale)")
-    p.add_argument("--auto-scale", action="store_true",
-                   help="Auto-scale position sizes from account equity (compound growth)")
-    p.add_argument("--leverage", type=float, default=5.0,
-                   help="Effective leverage for auto-scale (default: 5.0)")
+    p.add_argument("--size", type=float, default=1200.0,
+                   help="Total position budget in USD when auto-scale is off (default: 1200)")
+    p.add_argument("--max-size", type=float, default=1800.0,
+                   help="Max position cap in USD when auto-scale is off (default: 1800)")
+    p.add_argument("--auto-scale", action="store_true", default=True,
+                   help="Auto-scale position sizes from account equity (default: ON)")
+    p.add_argument("--no-auto-scale", action="store_true",
+                   help="Disable auto-scale, use fixed --size/--max-size instead")
+    p.add_argument("--leverage", type=float, default=3.0,
+                   help="Effective leverage for auto-scale (default: 3.0)")
     p.add_argument("--max-pos-cap", type=float, default=500_000.0,
                    help="Hard ceiling on max position USD (default: 500000)")
 
     # Risk overrides
-    p.add_argument("--max-daily-loss", type=float, default=30.0,
-                   help="Max daily loss in USD (default: 30)")
+    p.add_argument("--max-daily-loss", type=float, default=200.0,
+                   help="Max daily loss in USD (default: 200)")
     p.add_argument("--max-daily-trades", type=int, default=20,
                    help="Max trades per day (default: 20)")
 
@@ -188,6 +200,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Handle auto-scale toggle (--no-auto-scale overrides default ON)
+    use_auto_scale = args.auto_scale and not args.no_auto_scale
 
     # Validate private key
     pk_env = "HYPERLIQUID_TESTNET_PK" if args.testnet else "HYPERLIQUID_MAINNET_PK"
@@ -228,7 +243,11 @@ def main():
     print(f"   Noise Sup:    {profile['noise_suppression_window']}@{profile['noise_suppression_ratio']:.2f}")
     print(f"   Hard Stop:    {profile['hard_stop_pct']}%")
     print(f"   Max Hold:     {profile['max_hold_bars']} bars ({profile['max_hold_bars']*5}min)")
-    print(f"   Size:         ${args.size} (max ${args.max_size})")
+    if use_auto_scale:
+        size_str = f"AUTO-SCALE {args.leverage}x equity (base ~${args.leverage * 0.75 * 2400:,.0f} est.)"
+    else:
+        size_str = f"${args.size:,.0f} (max ${args.max_size:,.0f})"
+    print(f"   Size:         {size_str}")
     print(f"   Testnet:      {args.testnet}")
     print("=" * 70)
 
@@ -309,7 +328,7 @@ def main():
         scale_with_zscore=True,
 
         # Auto-scaling (compound growth)
-        auto_scale=args.auto_scale,
+        auto_scale=use_auto_scale,
         auto_scale_leverage=args.leverage,
         auto_scale_max_usd=args.max_pos_cap,
 
@@ -380,7 +399,7 @@ def main():
             scale_with_zscore=True,
 
             # Auto-scaling
-            auto_scale=args.auto_scale,
+            auto_scale=use_auto_scale,
             auto_scale_leverage=args.leverage,
             auto_scale_max_usd=args.max_pos_cap,
 
@@ -406,11 +425,11 @@ def main():
     node.add_exec_client_factory(HYPERLIQUID, HyperliquidLiveExecClientFactory)
     node.build()
 
-    if args.auto_scale:
+    if use_auto_scale:
         print(f"   🔄 Auto-scale: ON ({args.leverage}x leverage, cap ${args.max_pos_cap:,.0f})")
         print(f"      Sizing computed from account equity at each new trade")
     else:
-        print(f"   📏 Fixed sizing: base=${args.size} max=${args.max_size}")
+        print(f"   📏 Fixed sizing: base=${args.size:,.0f} max=${args.max_size:,.0f}")
 
     print(f"\n🚀 Starting Mean Reversion v003 on SOL (profile: {profile_name})...")
     try:
