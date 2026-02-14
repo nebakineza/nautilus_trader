@@ -179,8 +179,8 @@ def parse_args():
                    help="Auto-scale position sizes from account equity (default: ON)")
     p.add_argument("--no-auto-scale", action="store_true",
                    help="Disable auto-scale, use fixed --size/--max-size instead")
-    p.add_argument("--leverage", type=float, default=3.0,
-                   help="Effective leverage for auto-scale (default: 3.0)")
+    p.add_argument("--leverage", type=float, default=5.0,
+                   help="Effective leverage for auto-scale (default: 5.0)")
     p.add_argument("--max-pos-cap", type=float, default=500_000.0,
                    help="Hard ceiling on max position USD (default: 500000)")
 
@@ -244,7 +244,7 @@ def main():
     print(f"   Hard Stop:    {profile['hard_stop_pct']}%")
     print(f"   Max Hold:     {profile['max_hold_bars']} bars ({profile['max_hold_bars']*5}min)")
     if use_auto_scale:
-        size_str = f"AUTO-SCALE {args.leverage}x equity (base ~${args.leverage * 0.75 * 2400:,.0f} est.)"
+        size_str = f"AUTO-SCALE {args.leverage}x equity"
     else:
         size_str = f"${args.size:,.0f} (max ${args.max_size:,.0f})"
     print(f"   Size:         {size_str}")
