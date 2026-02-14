@@ -1068,18 +1068,19 @@ impl HyperliquidHttpClient {
                 8, // size_precision
                 price_increment,
                 size_increment,
-                None, // price_increment
-                None, // size_increment
-                None, // maker_fee
-                None, // taker_fee
-                None, // margin_init
-                None, // margin_maint
+                None, // multiplier
                 None, // lot_size
                 None, // max_quantity
                 None, // min_quantity
                 None, // max_notional
                 None, // min_notional
                 None, // max_price
+                None, // min_price
+                None, // margin_init
+                None, // margin_maint
+                None, // maker_fee
+                None, // taker_fee
+                None, // info
                 ts_event,
                 ts_event,
             ));
@@ -2291,7 +2292,8 @@ mod tests {
             None,
             None,
             None,
-            None,
+            None, // taker_fee
+            None, // info
             ts,
             ts,
         ));

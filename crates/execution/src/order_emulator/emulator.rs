@@ -1415,7 +1415,7 @@ mod tests {
     fn add_instrument_to_cache(cache: &Rc<RefCell<Cache>>, instrument: &CryptoPerpetual) {
         cache
             .borrow_mut()
-            .add_instrument(InstrumentAny::CryptoPerpetual(*instrument))
+            .add_instrument(InstrumentAny::CryptoPerpetual(instrument.clone()))
             .unwrap();
     }
 

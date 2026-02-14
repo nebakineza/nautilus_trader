@@ -931,7 +931,9 @@ mod tests {
         identifiers::{
             AccountId, ClientOrderId, InstrumentId, StrategyId, TradeId, TraderId, Venue,
         },
-        instruments::{CryptoPerpetual, InstrumentAny, stubs::crypto_perpetual_ethusdt},
+        instruments::{
+            CryptoPerpetual, Instrument, InstrumentAny, stubs::crypto_perpetual_ethusdt,
+        },
         orders::{Order, OrderAny, OrderTestBuilder},
         stubs::TestDefault,
         types::{AccountBalance, Currency, Money, Price, Quantity},
@@ -1067,7 +1069,7 @@ mod tests {
             BookType::L1_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1102,7 +1104,7 @@ mod tests {
             BookType::L1_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1137,7 +1139,7 @@ mod tests {
             BookType::L1_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1174,7 +1176,7 @@ mod tests {
             BookType::L1_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1225,7 +1227,7 @@ mod tests {
             BookType::L2_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1290,7 +1292,7 @@ mod tests {
             BookType::L2_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1362,7 +1364,7 @@ mod tests {
             BookType::L2_MBP,
             None,
         );
-        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
 
         // register instrument
         exchange.borrow_mut().add_instrument(instrument).unwrap();
@@ -1620,7 +1622,7 @@ mod tests {
             Some(cache.clone()),
         );
         let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
-        let instrument_id = crypto_perpetual_ethusdt.id;
+        let instrument_id = instrument.id();
         exchange.borrow_mut().add_instrument(instrument).unwrap();
 
         let quote = QuoteTick::new(
