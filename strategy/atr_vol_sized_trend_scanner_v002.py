@@ -104,6 +104,12 @@ class InstrumentState:
     entry_price: float = 0.0
     entry_atr: float = 0.0
 
+    # DCA tracking
+    dca_count: int = 0
+    avg_entry_price: float = 0.0
+    total_qty: float = 0.0
+    last_dca_price: float = 0.0
+
 
 class SafeAlphaScannerConfig(StrategyConfig, frozen=True, kw_only=True):
     """Configuration for Safe Alpha Scanner - Multi-Asset Trend Strategy.
@@ -241,6 +247,14 @@ class SafeAlphaScannerConfig(StrategyConfig, frozen=True, kw_only=True):
     # === SAFETY ===
     max_drawdown_pct: float = 15.0
     daily_loss_limit_usd: float = 500.0
+
+    # === DCA (Dollar Cost Average into pullbacks) ===
+    dca_enabled: bool = False
+    dca_max_adds: int = 2              # Max additional entries per position
+    dca_atr_drop_multiplier: float = 2.0  # Price must drop N*ATR from last entry
+    dca_qty_multiplier: float = 0.5    # Each DCA tranche = this fraction of initial qty
+    dca_require_trend: bool = True     # Only DCA if EMA trend still valid
+    dca_max_total_usd: float = 0.0    # Max total position value after DCA (0=use max_position_usd)
     
     # === EXECUTION ===
     use_limit_orders: bool = True
@@ -284,6 +298,9 @@ class SafeAlphaScanner(Strategy):
         '_atr_period', '_stop_mult', '_trailing_mult',
         '_adx_threshold', '_rsi_ob', '_rsi_os',
         '_fee_roundtrip',
+        # DCA config cache
+        '_dca_enabled', '_dca_max_adds', '_dca_atr_drop',
+        '_dca_qty_mult', '_dca_require_trend', '_dca_max_total',
         # EMA multipliers (pre-computed)
         '_fast_alpha', '_slow_alpha',
         # Per-instrument state
@@ -328,6 +345,14 @@ class SafeAlphaScanner(Strategy):
         self._rsi_ob: float = config.rsi_overbought
         self._rsi_os: float = config.rsi_oversold
         self._fee_roundtrip: float = config.taker_fee_pct + config.maker_fee_pct
+        
+        # DCA config cache
+        self._dca_enabled: bool = config.dca_enabled
+        self._dca_max_adds: int = config.dca_max_adds
+        self._dca_atr_drop: float = config.dca_atr_drop_multiplier
+        self._dca_qty_mult: float = config.dca_qty_multiplier
+        self._dca_require_trend: bool = config.dca_require_trend
+        self._dca_max_total: float = config.dca_max_total_usd if config.dca_max_total_usd > 0 else config.max_position_usd
         
         # Pre-compute EMA multipliers
         self._fast_alpha: float = 2.0 / (config.fast_ema_period + 1)
@@ -406,16 +431,25 @@ class SafeAlphaScanner(Strategy):
             
             self.log.info(f"   📊 Subscribed: {inst_id}", LogColor.BLUE)
         
-        # Get initial equity
-        accounts = self.cache.accounts()
-        if accounts:
-            account = accounts[0]
-            for balance in account.balances():
-                if balance.currency.code == "USDT":
+        # Get initial equity - defer to first trade if not available yet
+        # Note: Balance API varies by exchange, so we use a default if not available
+        try:
+            accounts = self.cache.accounts()
+            if accounts:
+                account = accounts[0]
+                # Try to get USDT balance
+                from nautilus_trader.model.currencies import USDT
+                balance = account.balance(USDT)
+                if balance is not None:
                     self._starting_equity = float(balance.total)
                     self._peak_equity = self._starting_equity
                     self._daily_start_equity = self._starting_equity
-                    break
+        except Exception as e:
+            self.log.warning(f"Could not get initial equity: {e}, using default")
+            # Set a reasonable default - will be updated on first position
+            self._starting_equity = 10000.0  # Default assumption
+            self._peak_equity = self._starting_equity
+            self._daily_start_equity = self._starting_equity
         
         self.log.info(f"   💰 Starting Equity: ${self._starting_equity:.2f}", LogColor.GREEN)
         self.log.info(f"   ✅ Initialized {len(self._states)} instruments", LogColor.GREEN)
@@ -470,16 +504,31 @@ class SafeAlphaScanner(Strategy):
             self._manage_position(state, bar)
         
         # === ENTRY LOGIC (only if we have room and this is a scan bar) ===
-        if len(self._active_positions) < self._max_positions:
-            if self._should_enter(state):
-                # Check correlation with existing positions
-                if self._passes_correlation_filter(inst_id):
-                    self._execute_entry(state, float(bar.close))
-                elif self.config.log_correlations:
-                    self.log.info(
-                        f"❌ {inst_id.symbol} rejected: too correlated with portfolio",
-                        LogColor.YELLOW
-                    )
+        # Skip if already have position in this instrument
+        if state.has_position or inst_id in self._active_positions:
+            return
+        
+        # Skip if already have pending order for this instrument
+        if inst_id in self._pending_orders:
+            return
+        
+        # Check position count limit
+        if len(self._active_positions) >= self._max_positions:
+            return
+        
+        # Check portfolio heat (total capital at risk)
+        if not self._check_portfolio_heat():
+            return
+        
+        if self._should_enter(state):
+            # Check correlation with existing positions
+            if self._passes_correlation_filter(inst_id):
+                self._execute_entry(state, float(bar.close))
+            elif self.config.log_correlations:
+                self.log.info(
+                    f"❌ {inst_id.symbol} rejected: too correlated with portfolio",
+                    LogColor.YELLOW
+                )
         
         # Store previous EMA values
         state.prev_fast_ema = state.fast_ema
@@ -839,7 +888,7 @@ class SafeAlphaScanner(Strategy):
     # =========================================================================
     
     def _manage_position(self, state: InstrumentState, bar: Bar) -> None:
-        """Manage existing position - check for exit signals."""
+        """Manage existing position - check for exit signals and DCA."""
         close = float(bar.close)
         
         # Check for bearish crossover (exit signal)
@@ -847,10 +896,114 @@ class SafeAlphaScanner(Strategy):
             self._close_position(state, "EMA Crossover Exit")
             return
         
+        # Check DCA opportunity on pullback
+        if self._dca_enabled:
+            self._check_dca(state, close)
+        
         # Update trailing stop if enabled
         if self.config.trailing_stop_enabled:
             self._update_trailing_stop(state, close)
     
+    # =========================================================================
+    # DCA (Dollar Cost Averaging into pullbacks)
+    # =========================================================================
+
+    def _check_dca(self, state: InstrumentState, current_price: float) -> None:
+        """Check if price has pulled back enough for a DCA add.
+
+        Conditions:
+        1. DCA count < max adds
+        2. Price dropped N*ATR from last entry/DCA price
+        3. Trend still valid (EMA fast > slow) if required
+        4. Total position value won't exceed cap
+        5. No pending order already in flight for this instrument
+        """
+        if state.dca_count >= self._dca_max_adds:
+            return
+
+        if state.instrument_id in self._pending_orders:
+            return
+
+        # Reference price = last DCA fill or original entry
+        ref_price = state.last_dca_price if state.last_dca_price > 0 else state.entry_price
+        if ref_price <= 0 or state.entry_atr <= 0:
+            return
+
+        drop_required = state.entry_atr * self._dca_atr_drop
+        if current_price > ref_price - drop_required:
+            return  # Not enough pullback
+
+        # Trend still valid?
+        if self._dca_require_trend and state.fast_ema <= state.slow_ema:
+            return
+
+        # Position value cap
+        current_value = state.total_qty * current_price
+        if current_value >= self._dca_max_total:
+            return
+
+        self._execute_dca(state, current_price)
+
+    def _execute_dca(self, state: InstrumentState, price: float) -> None:
+        """Add a DCA tranche at reduced size."""
+        if state.instrument is None or state.entry_atr <= 0:
+            return
+
+        # Size = initial risk-based qty * dca_qty_multiplier
+        stop_distance = state.entry_atr * self._stop_mult
+        initial_qty = self._risk_usd / stop_distance
+        dca_qty = initial_qty * self._dca_qty_mult
+
+        dca_value = dca_qty * price
+
+        # Check it won't exceed total cap
+        new_total_value = (state.total_qty + dca_qty) * price
+        if new_total_value > self._dca_max_total:
+            dca_qty = max(0, (self._dca_max_total / price) - state.total_qty)
+            dca_value = dca_qty * price
+
+        if dca_value < self.config.min_position_usd:
+            return
+
+        if dca_qty < state.min_qty:
+            dca_qty = state.min_qty
+
+        quantity = state.instrument.make_qty(Decimal(str(dca_qty)))
+
+        if self.config.use_limit_orders:
+            chase = state.tick_size * self.config.limit_chase_ticks
+            limit_price = price + chase
+            limit_price = round(limit_price / state.tick_size) * state.tick_size
+            price_obj = state.instrument.make_price(Decimal(str(limit_price)))
+
+            order = self.order_factory.limit(
+                instrument_id=state.instrument_id,
+                order_side=OrderSide.BUY,
+                quantity=quantity,
+                price=price_obj,
+                time_in_force=self.config.time_in_force,
+                post_only=False,
+            )
+        else:
+            order = self.order_factory.market(
+                instrument_id=state.instrument_id,
+                order_side=OrderSide.BUY,
+                quantity=quantity,
+                time_in_force=TimeInForce.GTC,
+            )
+
+        self._pending_orders[state.instrument_id] = order
+        self.submit_order(order)
+
+        if self.config.log_trades:
+            drop_pct = (state.entry_price - price) / state.entry_price * 100
+            self.log.info(
+                f"📉 DCA #{state.dca_count + 1}: {state.instrument_id.symbol} BUY {quantity} "
+                f"@ {price:.4f} | Drop={drop_pct:.1f}% | "
+                f"AvgEntry={state.avg_entry_price:.4f}→~{((state.avg_entry_price * state.total_qty) + (price * dca_qty)) / (state.total_qty + dca_qty):.4f}",
+                LogColor.CYAN,
+            )
+
     def _close_position(self, state: InstrumentState, reason: str) -> None:
         """Close position for instrument."""
         inst_id = state.instrument_id
@@ -876,8 +1029,9 @@ class SafeAlphaScanner(Strategy):
         if not state.has_position or state.entry_price == 0:
             return
         
-        # Check if profit threshold reached
-        profit_pct = (current_price - state.entry_price) / state.entry_price * 100
+        # Check if profit threshold reached (use avg entry when DCA is active)
+        ref_price = state.avg_entry_price if state.avg_entry_price > 0 else state.entry_price
+        profit_pct = (current_price - ref_price) / ref_price * 100
         if profit_pct < self.config.trailing_activation_profit_pct:
             return
         
@@ -918,6 +1072,28 @@ class SafeAlphaScanner(Strategy):
     # SAFETY
     # =========================================================================
     
+    def _check_portfolio_heat(self) -> bool:
+        """Check if we have room for another position within heat limits.
+        
+        Portfolio heat = (num_positions * risk_per_trade) / equity
+        """
+        if self._starting_equity <= 0:
+            return True  # Can't calculate, allow trade
+        
+        current_positions = len(self._active_positions)
+        # Include the new position we're about to take
+        potential_heat = ((current_positions + 1) * self._risk_usd) / self._starting_equity * 100
+        
+        if potential_heat > self._max_heat_pct:
+            if self.config.log_sizing:
+                self.log.info(
+                    f"🔥 HEAT LIMIT: {potential_heat:.1f}% > {self._max_heat_pct}% max",
+                    LogColor.YELLOW
+                )
+            return False
+        
+        return True
+    
     def _check_safety(self) -> None:
         """Check portfolio-wide safety limits."""
         current_equity = self._starting_equity + self._realized_pnl_today + self._total_unrealized_pnl
@@ -945,6 +1121,17 @@ class SafeAlphaScanner(Strategy):
                 f"⚠️ DAILY LIMIT: ${daily_pnl:.2f} <= -${self.config.daily_loss_limit_usd}",
                 LogColor.RED
             )
+    
+    def reset_daily_limits(self) -> None:
+        """Reset daily loss tracking. Call at start of new trading day."""
+        current_equity = self._starting_equity + self._realized_pnl_today + self._total_unrealized_pnl
+        self._daily_start_equity = current_equity
+        self._realized_pnl_today = 0.0
+        self._daily_limit_hit = False
+        self.log.info(
+            f"🔄 DAILY RESET: New starting equity ${current_equity:.2f}",
+            LogColor.GREEN
+        )
     
     def _close_all_positions(self, reason: str) -> None:
         """Close all positions across portfolio."""
@@ -977,15 +1164,43 @@ class SafeAlphaScanner(Strategy):
         
         # Entry fill
         if inst_id in self._pending_orders and side == OrderSide.BUY:
-            state.has_position = True
-            state.position_side = side
-            state.entry_price = price
-            state.entry_atr = state.atr
-            self._active_positions.add(inst_id)
             del self._pending_orders[inst_id]
-            
-            # Place initial stop
-            self._place_initial_stop(state, price)
+
+            if not state.has_position:
+                # === INITIAL ENTRY ===
+                state.has_position = True
+                state.position_side = side
+                state.entry_price = price
+                state.entry_atr = state.atr
+                state.dca_count = 0
+                state.avg_entry_price = price
+                state.total_qty = qty
+                state.last_dca_price = price
+                self._active_positions.add(inst_id)
+
+                # Place initial stop
+                self._place_initial_stop(state, price)
+            else:
+                # === DCA ADD ===
+                old_total = state.total_qty
+                state.total_qty += qty
+                state.avg_entry_price = (
+                    (state.avg_entry_price * old_total + price * qty) / state.total_qty
+                )
+                state.dca_count += 1
+                state.last_dca_price = price
+
+                if self.config.log_trades:
+                    self.log.info(
+                        f"📊 DCA FILL #{state.dca_count}: {inst_id.symbol} | "
+                        f"AvgEntry=${state.avg_entry_price:.4f} | "
+                        f"TotalQty={state.total_qty:.6f} | "
+                        f"Value=${state.total_qty * price:.2f}",
+                        LogColor.CYAN,
+                    )
+
+                # Update stop to cover full position at new avg-based level
+                self._update_stop_after_dca(state)
     
     def _place_initial_stop(self, state: InstrumentState, entry_price: float) -> None:
         """Place initial stop loss after entry."""
@@ -994,18 +1209,28 @@ class SafeAlphaScanner(Strategy):
         
         stop_distance = state.entry_atr * self._stop_mult
         stop_price = entry_price - stop_distance
+        
+        # Ensure stop price is positive and properly rounded
+        if stop_price <= 0:
+            self.log.warning(f"⚠️ {state.instrument_id.symbol} stop price invalid: {stop_price}")
+            return
+        
         stop_price = round(stop_price / state.tick_size) * state.tick_size
         
         position = self.cache.position(state.instrument_id)
-        if position is None:
+        if position is None or position.quantity <= 0:
+            self.log.warning(f"⚠️ {state.instrument_id.symbol} no position for stop")
             return
+        
+        # Use the actual position quantity from cache (handles partial fills)
+        actual_qty = position.quantity
         
         stop_price_obj = state.instrument.make_price(Decimal(str(stop_price)))
         
         stop_order = self.order_factory.stop_market(
             instrument_id=state.instrument_id,
             order_side=OrderSide.SELL,
-            quantity=position.quantity,
+            quantity=actual_qty,
             trigger_price=stop_price_obj,
             trigger_type=TriggerType.LAST_PRICE,
             time_in_force=TimeInForce.GTC,
@@ -1019,6 +1244,52 @@ class SafeAlphaScanner(Strategy):
                 f"🛡️ STOP: {state.instrument_id.symbol} @ {stop_price:.4f} "
                 f"(ATR {state.entry_atr:.4f} x {self._stop_mult})",
                 LogColor.YELLOW
+            )
+
+    def _update_stop_after_dca(self, state: InstrumentState) -> None:
+        """Cancel old stop and place new one covering full position at avg-entry-based level."""
+        inst_id = state.instrument_id
+        if state.instrument is None or state.entry_atr <= 0:
+            return
+
+        # Cancel existing stop
+        if inst_id in self._stop_orders:
+            old_stop = self._stop_orders[inst_id]
+            if not old_stop.is_closed:
+                self.cancel_order(old_stop)
+            del self._stop_orders[inst_id]
+
+        # New stop based on average entry
+        stop_distance = state.entry_atr * self._stop_mult
+        stop_price = state.avg_entry_price - stop_distance
+
+        if stop_price <= 0:
+            return
+
+        stop_price = round(stop_price / state.tick_size) * state.tick_size
+
+        position = self.cache.position(inst_id)
+        if position is None or position.quantity <= 0:
+            return
+
+        stop_price_obj = state.instrument.make_price(Decimal(str(stop_price)))
+        stop_order = self.order_factory.stop_market(
+            instrument_id=inst_id,
+            order_side=OrderSide.SELL,
+            quantity=position.quantity,
+            trigger_price=stop_price_obj,
+            trigger_type=TriggerType.LAST_PRICE,
+            time_in_force=TimeInForce.GTC,
+        )
+
+        self._stop_orders[inst_id] = stop_order
+        self.submit_order(stop_order)
+
+        if self.config.log_trades:
+            self.log.info(
+                f"🛡️ STOP (DCA): {inst_id.symbol} @ {stop_price:.4f} "
+                f"| AvgEntry={state.avg_entry_price:.4f} | Qty={position.quantity}",
+                LogColor.YELLOW,
             )
     
     def on_position_opened(self, event: PositionOpened) -> None:
@@ -1039,6 +1310,10 @@ class SafeAlphaScanner(Strategy):
             state.position_side = None
             state.entry_price = 0.0
             state.entry_atr = 0.0
+            state.dca_count = 0
+            state.avg_entry_price = 0.0
+            state.total_qty = 0.0
+            state.last_dca_price = 0.0
         
         self._active_positions.discard(inst_id)
         

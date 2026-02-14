@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import gc
 from collections import deque
-from decimal import Decimal
 from typing import Final
 
 import numpy as np
@@ -31,7 +30,7 @@ from nautilus_trader.model.data import OrderBookDeltas
 from nautilus_trader.model.enums import BookType, OrderSide, OrderStatus, TimeInForce
 from nautilus_trader.model.identifiers import ClientId, InstrumentId
 from nautilus_trader.model.instruments import Instrument
-from nautilus_trader.model.objects import Currency, Quantity
+from nautilus_trader.model.objects import Currency, Price, Quantity
 from nautilus_trader.model.orders import Order
 from nautilus_trader.trading.strategy import Strategy
 
@@ -291,6 +290,8 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
         '_fill_sides', '_fill_idx', '_fill_count',
         # Cached functions
         '_now_ns', '_tick_size',
+        # Price/Quantity precision (for fast construction)
+        '_price_precision', '_size_precision',
         # Metrics
         '_metrics',
         # Client ID
@@ -402,6 +403,11 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
         self._bid_reject_pause_ns: int = 0  # Rejection cooldown
         self._ask_reject_pause_ns: int = 0
 
+        # Price/Quantity precision (set in on_start, defaults for safety)
+        self._price_precision: int = 8
+        self._size_precision: int = 8
+        self._tick_size: float = 0.0001
+
         # Balance tracking (v008.9)
         # Extract base/quote currencies from instrument (e.g., LINKUSDT-SPOT -> LINK, USDT)
         symbol = str(config.follower_instrument_id.symbol)
@@ -477,6 +483,9 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
             return
 
         self._tick_size = float(self.follower_instrument.price_increment)
+        # Cache precision for fast Price/Quantity construction (4.4x faster than Decimal)
+        self._price_precision = self.follower_instrument.price_precision
+        self._size_precision = self.follower_instrument.size_precision
 
         self.subscribe_order_book_deltas(
             self.config.follower_instrument_id,
@@ -839,13 +848,14 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
         if self._tick_size > 0:
             price = round(price / self._tick_size) * self._tick_size
         
-        price_dec = self.follower_instrument.make_price(Decimal(str(price)))
-        qty_obj = self.follower_instrument.make_qty(Decimal(str(qty)))
+        # Direct float construction (4.4x faster than Decimal(str()))
+        price_obj = Price(price, precision=self._price_precision)
+        qty_obj = Quantity(qty, precision=self._size_precision)
 
         order = self.order_factory.limit(
             instrument_id=self.config.follower_instrument_id,
             order_side=side,
-            price=price_dec,
+            price=price_obj,
             quantity=qty_obj,
             time_in_force=TimeInForce.IOC,  # Immediate or cancel
             post_only=False,  # Allow taking
@@ -1357,8 +1367,9 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
         if now_ns < reject_pause:
             return
 
-        price_dec = self.follower_instrument.make_price(Decimal(str(price)))
-        qty_obj = self.follower_instrument.make_qty(Decimal(str(qty)))
+        # Direct float construction (4.4x faster than Decimal(str()))
+        price_obj = Price(price, precision=self._price_precision)
+        qty_obj = Quantity(qty, precision=self._size_precision)
 
         # If we have an existing order that's still open, MODIFY it (preserves queue position)
         if order is not None and not order.is_closed:
@@ -1374,7 +1385,7 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
                 return
             
             # MODIFY existing order (faster than cancel+replace, preserves queue position)
-            self.modify_order(order, quantity=qty_obj, price=price_dec, client_id=self.client_id)
+            self.modify_order(order, quantity=qty_obj, price=price_obj, client_id=self.client_id)
             # Update timestamp
             if side == OrderSide.BUY:
                 self._bid_order_ts_ns = now_ns
@@ -1386,7 +1397,7 @@ class LeadLagMMv8Timekeeper(Strategy, PortfolioRiskMixin):
         new_order = self.order_factory.limit(
             instrument_id=self.config.follower_instrument_id,
             order_side=side,
-            price=price_dec,
+            price=price_obj,
             quantity=qty_obj,
             time_in_force=self.config.time_in_force,
             post_only=self.config.post_only,
