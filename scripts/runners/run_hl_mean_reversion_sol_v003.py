@@ -276,7 +276,6 @@ def main():
         exec_clients={
             HYPERLIQUID: HyperliquidExecClientConfig(
                 private_key=private_key,
-                wallet_address=wallet_address,
                 testnet=args.testnet,
                 instrument_provider=InstrumentProviderConfig(load_all=True),
             ),
