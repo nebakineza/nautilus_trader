@@ -185,8 +185,10 @@ def parse_args():
                    help="Hard ceiling on max position USD (default: 500000)")
 
     # Risk overrides
-    p.add_argument("--max-daily-loss", type=float, default=200.0,
-                   help="Max daily loss in USD (default: 200)")
+    p.add_argument("--max-daily-loss", type=float, default=500.0,
+                   help="Max daily loss floor in USD (default: 500)")
+    p.add_argument("--max-daily-loss-pct", type=float, default=5.0,
+                   help="Max daily loss as %% of equity — scales with capital (default: 5.0)")
     p.add_argument("--max-daily-trades", type=int, default=20,
                    help="Max trades per day (default: 20)")
 
@@ -343,6 +345,7 @@ def main():
         # Risk
         cooldown_bars=profile["cooldown_bars"],
         max_daily_loss_usd=args.max_daily_loss,
+        max_daily_loss_pct=args.max_daily_loss_pct,
         max_daily_trades=args.max_daily_trades,
         max_open_positions=1,
     )
@@ -414,6 +417,7 @@ def main():
             # Risk — conservative for sniper
             cooldown_bars=sniper["cooldown_bars"],
             max_daily_loss_usd=args.max_daily_loss,
+            max_daily_loss_pct=args.max_daily_loss_pct,
             max_daily_trades=5,  # Sniper trades rarely
             max_open_positions=1,
         )

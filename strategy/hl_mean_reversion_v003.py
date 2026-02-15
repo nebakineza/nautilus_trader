@@ -249,7 +249,13 @@ class HLMeanReversionConfig(StrategyConfig, frozen=True):
 
     # === RISK CONTROLS ===
     cooldown_bars: int = 3            # Minimum bars between entries (Optuna: tighter)
-    max_daily_loss_usd: float = 500.0 # ~20% of equity — halts new entries for the day
+    max_daily_loss_usd: float = 500.0 # Fixed USD floor — always enforced
+    max_daily_loss_pct: float = 5.0   # % of last known equity — scales with capital
+    #                                   Effective limit = max(usd_floor, equity × pct/100)
+    #                                   At $2,400:  max(500, 120) = $500
+    #                                   At $10,000: max(500, 500) = $500
+    #                                   At $25,000: max(500, 1250) = $1,250
+    #                                   At $67,000: max(500, 3350) = $3,350
     max_daily_trades: int = 20        # Higher since we have multiple legs
     max_open_positions: int = 1
 
@@ -801,7 +807,11 @@ class HLMeanReversion(Strategy):
         # ══════════════════════════════════════════════════════════════
 
         # Safety checks
-        if self._daily_pnl <= -self.config.max_daily_loss_usd:
+        daily_loss_limit = self.config.max_daily_loss_usd
+        if self._last_equity > 0:
+            pct_limit = self._last_equity * self.config.max_daily_loss_pct / 100.0
+            daily_loss_limit = max(daily_loss_limit, pct_limit)
+        if self._daily_pnl <= -daily_loss_limit:
             return
         if self._daily_trades >= self.config.max_daily_trades:
             return
